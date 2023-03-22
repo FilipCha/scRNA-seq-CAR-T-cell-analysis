@@ -1,0 +1,1335 @@
+---
+title: "Manuscript"
+author: "F.T. Charitidis"
+date: "2023-03-19"
+output: html_document
+---
+
+```{r}
+options(java.parameters = c("-XX:+UseConcMarkSweepGC", "-Xmx8192m"))
+options(digits=3)
+options(ggrepel.max.overlaps=Inf)
+
+# Load
+library(ggplot2)
+library(tidyr)
+library(multtest)
+library(dplyr)
+library(Seurat)
+library(SeuratData)
+library(sctransform)
+library(rJava)
+library(xlsx)
+library(umap)
+library(ggpubr)
+library(ggrepel)
+library(scRNAseq)
+library(scater)
+library(scran)
+library(tidyverse)
+library(RColorBrewer)
+library(rstatix)
+library(ggVennDiagram)
+library(multimode)
+library(EnhancedVolcano)
+library(ChIPpeakAnno)
+library("org.Hs.eg.db")
+library(WebGestaltR)
+library(EnsDb.Hsapiens.v86)
+
+# Define increased memory size
+#memory.limit(80000)
+
+# For reproducibility of the assay
+set.seed(42)
+```
+
+```{r}
+# Create a function to add extra column with the full description of a gene
+full.gene.names <- function(geneset){
+  EntrezID <- select(EnsDb.Hsapiens.v86,  
+       keys = geneset$gene, 
+       columns = "ENTREZID", 
+       keytype = "SYMBOL")
+
+
+geneset$name =   mapIds(org.Hs.eg.db,
+                    keys=geneset$gene, 
+                    column="GENENAME",
+                    keytype="SYMBOL",
+                    multiVals="first")
+return(geneset)
+}
+```
+
+
+# Load files
+
+## Import the UMI-gene matrices from Seven Bridges
+In case Seurat objects (.rds files) are not available, load the RSEC_MolsPerCell.csv files.
+```{r, error=TRUE}
+Untransduced_1 <- read.csv("~/Untransduced_Donor1_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
+Untransduced_2 <- read.csv("~/Untransduced_Donor2_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
+Untransduced_3 <- read.csv("~/Untransduced_Donor3_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
+
+VSVG_LV_1 <- read.csv("~/VSV_LV_Donor1_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
+VSVG_LV_2 <- read.csv("~/VSV_LV_Donor2_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
+VSVG_LV_3 <- read.csv("~/VSV_LV_Donor3_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
+
+CD8_LV_1 <- read.csv("~/CD8_LV_Donor1_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
+CD8_LV_2 <- read.csv("~/CD8_LV_Donor1_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
+CD8_LV_3 <- read.csv("~/CD8_LV_Donor1_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
+
+CD4_LV_1 <- read.csv("~/CD4_LV_Donor1_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
+CD4_LV_2 <- read.csv("~/CD4_LV_Donor1_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
+CD4_LV_3 <- read.csv("~/CD4_LV_Donor1_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
+```
+
+Create Seurat objects
+```{r}
+Ut_1 <- CreateSeuratObject(counts = t(Untransduced_1), project = "1. Untransduced_D1")
+Ut_2 <- CreateSeuratObject(counts = t(Untransduced_2), project = "1. Untransduced_D2")
+Ut_3 <- CreateSeuratObject(counts = t(Untransduced_3), project = "1. Untransduced_D3")
+
+CD8_1 <- CreateSeuratObject(counts = t(CD8_LV_1), project = "2. CD8-LV_D1")
+CD8_2 <- CreateSeuratObject(counts = t(CD8_LV_2), project = "2. CD8-LV_D2")
+CD8_3 <- CreateSeuratObject(counts = t(CD8_LV_3), project = "2. CD8-LV_D3")
+
+CD4_1 <- CreateSeuratObject(counts = t(CD4_LV_1), project = "3. CD4-LV_D1")
+CD4_2 <- CreateSeuratObject(counts = t(CD4_LV_2), project = "3. CD4-LV_D2")
+CD4_3 <- CreateSeuratObject(counts = t(CD4_LV_3), project = "3. CD4-LV_D3")
+
+VSVG_1 <- CreateSeuratObject(counts = t(VSVG_LV_1), project = "4. VSV-LV_D1")
+VSVG_2 <- CreateSeuratObject(counts = t(VSVG_LV_2), project = "4. VSV-LV_D2")
+VSVG_3 <- CreateSeuratObject(counts = t(VSVG_LV_3), project = "4. VSV-LV_D3")
+```
+
+Merge Seurat objects
+```{r}
+F3.Ut <- merge(Ut_1, c(Ut_2, Ut_3))
+F3.CD8 <- merge(CD8_1, c(CD8_2, CD8_3))
+F3.CD4 <- merge(CD4_1, c(CD4_2, CD4_3))
+F3.VSV <- merge(VSVG_1, c(VSVG_2, VSVG_3))
+F3.All <- merge(F3.Ut, c(F3.CD8, F3.CD4, F3.VSV))
+```
+
+Remove unecessary files
+```{r}
+remove(Ut_1, Ut_2, Ut_3, CD8_1, CD8_2, CD8_3, CD4_1, CD4_2, CD4_3, VSVG_1, VSVG_2, VSVG_3, F3.Ut, F3.VSV)
+```
+
+
+## Rename F3.All object
+
+```{r}
+# To donors
+Idents(F3.All) <- "orig.ident"
+F3.All$All.Idents <- Idents(F3.All)
+levels(F3.All)
+Donors <- c("Donor 1", "Donor 2", "Donor 3","Donor 1", "Donor 2", "Donor 3", "Donor 1","Donor 2", "Donor 3", "Donor 1", "Donor 2","Donor 3")
+names(Donors) <- levels(F3.All)
+F3.All[["Donors"]] <- Idents(F3.All)
+Idents(F3.All) <- "Donors"
+F3.All <-  RenameIdents(F3.All, Donors)
+F3.All$Donors <- Idents(F3.All)
+levels(F3.All)
+
+# To cartridges
+Idents(F3.All) <- "orig.ident"
+F3.All$All.Idents <- Idents(F3.All)
+levels(F3.All)
+cartridges <- c("Cartridge 1", "Cartridge 5", "Cartridge 5","Cartridge 2", "Cartridge 5", "Cartridge 5", "Cartridge 3","Cartridge 5", "Cartridge 5", "Cartridge 4", "Cartridge 5","Cartridge 5")
+names(cartridges) <- levels(F3.All)
+F3.All[["cartridges"]] <- Idents(F3.All)
+Idents(F3.All) <- "cartridges"
+F3.All <-  RenameIdents(F3.All, cartridges)
+F3.All$cartridges <- Idents(F3.All)
+levels(F3.All)
+
+# Re-ordering the cartridge groups
+F3.All@meta.data$cartridges <- factor(F3.All@meta.data$cartridges, levels = c("Cartridge 1", "Cartridge 2","Cartridge 3","Cartridge 4","Cartridge 5"))
+levels(F3.All) # New order is presented correctly in UMAP
+
+# To samples
+Idents(F3.All) <- "All.Idents"
+F3.All[["Numbered.samples"]] <- Idents(F3.All)
+Numbered.samples <- c("1. Untransduced", "1. Untransduced", "1. Untransduced", "2. CD8-LV","2. CD8-LV","2. CD8-LV", "3. CD4-LV","3. CD4-LV","3. CD4-LV", "4. VSV-LV","4. VSV-LV","4. VSV-LV")
+names(Numbered.samples) <- levels(F3.All)
+Idents(F3.All) <- "Numbered.samples"
+F3.All <- RenameIdents(F3.All, Numbered.samples)
+F3.All$Numbered.samples <- Idents(F3.All)
+levels(F3.All)
+
+# Pass Numbered samples to Origin_ID
+Idents(F3.All) <- "orig.ident"
+F3.All$Origin_ID <- Idents(F3.All)
+levels(F3.All)
+```
+
+
+# Filtering, QC, pre-integration
+
+Filter low quality cells (outliers) through scater/scuttle/scran method
+```{r}
+# Transform Seurat object to SingleCellExperiment Object (sce)
+sce <- as.SingleCellExperiment(F3.All)
+sce
+
+# Remove genes that are not expressed in any cell:
+keep_feature <- rowSums(counts(sce) > 0) > 0
+
+# Remove genes with less than 5 non-zero observations. Like SCTransform min_cells threshold
+keep_feature <- nexprs(sce, byrow = TRUE, detection_limit = 0) >= 5
+sce <- sce[keep_feature, ]
+length(rownames(sce))
+
+# Quality control (fast way)
+is.mito <- grep(pattern = "^MT-", x = rownames(sce), value =  TRUE)
+qcstats <- perCellQCMetrics(sce, subsets=list(Mito=is.mito))
+filtered <- quickPerCellQC(qcstats,percent_subsets=c("subsets_Mito_percent"))
+sce <- sce[, !filtered$discard]
+print("Cells to discard")
+colSums(as.matrix(filtered))
+
+print("Final pre-processed object with Scater")
+sce
+```
+
+```{r}
+# Transform back to Seurat object
+F3.filtered <- as.Seurat(sce, counts = "counts", data = "logcounts")
+Idents(F3.filtered) <- "orig.ident"
+#F3.filtered@assays$RNA <- F3.filtered@assays$originalexp
+```
+
+
+## Mitochondrial genes frequency
+
+Create an extra column in the data sets containing the percentage of mitochondrial genes
+```{r}
+mito.genes <- c("MT-ND1", "MT-ND2", "MT-COX1", "MT-COX2", "MT-ATP8", "MT-ATP6", "MT-COX3", "MT-ND3", "MT-ND4L", "MT-ND4", "MT-ND5", "MT-ND6", "MT-CYTB")
+mito.genes.freq.names <- grep(pattern = "^MT-", x = rownames(F3.All), value = TRUE)
+mito.genes.freq.names
+ribo.genes.freq.names <- grep(pattern = "^RP[SL]", x = rownames(F3.All), value = TRUE)
+ribo.genes.freq.names
+
+F3.All[["percent.mt"]] <- PercentageFeatureSet(F3.All, features = mito.genes.freq.names)
+F3.filtered[["percent.mt"]] <- PercentageFeatureSet(F3.filtered, features = mito.genes.freq.names)
+
+colMeans(F3.All[["percent.mt"]], na.rm = TRUE)
+colMeans(F3.filtered[["percent.mt"]], na.rm = TRUE)
+
+F3.All[["percent.ribo"]] <- PercentageFeatureSet(F3.All, features = ribo.genes.freq.names)
+F3.filtered[["percent.ribo"]] <- PercentageFeatureSet(F3.filtered, features = ribo.genes.freq.names)
+
+colMeans(F3.All[["percent.ribo"]], na.rm = TRUE)
+colMeans(F3.filtered[["percent.ribo"]], na.rm = TRUE)
+```
+
+ 
+```{r}
+# SCE object was created before during the QC
+clusters = quickCluster(sce)
+sce = computeSumFactors(sce, cluster=clusters)
+sce = scuttle::logNormCounts(sce, log = FALSE, pseudo.count=0) # without(!) log transform
+
+# Transform back to Seurat object
+F3.filtered <- as.Seurat(sce, counts = "counts", data = "logcounts")
+Idents(F3.filtered) <- "Origin_ID"
+
+# Paste log-transform the normalized counts to Seurat object
+#F3.filtered@assays$RNA <- F3.filtered@assays$originalexp
+F3.filtered@assays$RNA@data = log1p(x = assay(sce, "normcounts")) # ln(counts+1)
+```
+
+
+```{r}
+# Pass again the percent.mito & Largest gene expression to seurat object
+F3.filtered[["percent.mt"]] <- PercentageFeatureSet(F3.filtered, features = is.mito)
+F3.filtered[["percent.ribo"]] <- PercentageFeatureSet(F3.filtered, features = ribo.genes.freq.names)
+F3.filtered$Percent.Largest.Gene <- apply(F3.filtered@assays$RNA@counts ,2, function(x)(100*max(x))/sum(x))
+F3.All$Percent.Largest.Gene <- apply(F3.All@assays$RNA@counts ,2, function(x)(100*max(x))/sum(x))
+```
+
+
+## Table cells filtered
+Tables of cell numbers before and after filtering
+```{r}
+# Number of cells in each sample before filtering
+unfiltered.population <- table(F3.All$All.Idents)
+print("Unfiltered populations")
+head(unfiltered.population, n="nmax")
+
+# Number of cells in each sample post-filtering
+filtered.population <- table(F3.filtered$All.Idents)
+print("Post-filtered populations")
+head(filtered.population, n="nmax")
+
+# Cell loss original-filtered
+cell.loss <- unfiltered.population - filtered.population
+print("Total cell loss in each sample")
+head(cell.loss, n="nmax")
+print("Proportion of low quality cells removed from each sample")
+head(cell.loss/unfiltered.population*100, n="nmax")
+```
+
+ 
+### QC Violin plots
+#### Fig. S1A
+```{r, fig.height=7, fig.width=15}
+# Unfiltered
+Idents(F3.All) <- "Donors"
+VlnPlot(F3.All, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), pt.size = 0.1)
+
+# Filtered
+Idents(F3.filtered) <-"Donors"
+VlnPlot(F3.filtered, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"))
+```
+
+## Scaling
+
+```{r}
+# Cell cycle scoring
+s.genes <- cc.genes$s.genes
+g2m.genes <- cc.genes$g2m.genes
+F3.filtered.cc <- CellCycleScoring(F3.filtered, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+F3.filtered <- CellCycleScoring(F3.filtered, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+all.genes <- rownames(F3.filtered@assays$RNA@data)
+
+# Cell-cycle corrected data (F3.filtered.cc). Regress also for percent.mt
+DefaultAssay(F3.filtered.cc) <- "RNA"
+F3.filtered.cc <- ScaleData(F3.filtered.cc, features = all.genes, vars.to.regress = c("S.Score", "G2M.Score", "percent.mt","nFeature_RNA", "nCount_RNA"))
+```
+
+ 
+
+## Variable features
+
+```{r}
+# Variable features
+F3.filtered.cc <- FindVariableFeatures(F3.filtered.cc, selection.method = "vst",  nfeatures = 2000)
+LabelPoints(plot = VariableFeaturePlot(F3.filtered.cc), points = head(VariableFeatures(F3.filtered.cc), 50), xnudge =0, ynudge=0, repel = TRUE)+labs(title = "Highly Variable Features: all samples")
+
+#Variable features for not cc corrected object
+F3.filtered <- FindVariableFeatures(F3.filtered, selection.method = "vst",  nfeatures = 2000)
+LabelPoints(plot = VariableFeaturePlot(F3.filtered), points = head(VariableFeatures(F3.filtered), 50), xnudge =0, ynudge=0, repel = TRUE)+labs(title = "Highly Variable Features: all samples")
+```
+
+ 
+
+## PCA, UMAP & clustering
+
+### Fig. S1C
+```{r}
+# Cell cycle corrected
+F3.filtered.cc <- RunPCA(F3.filtered.cc, features = VariableFeatures(F3.filtered.cc), npcs = 50, assay = "RNA")
+
+ElbowPlot(F3.filtered.cc, ndims = 50)+geom_vline(xintercept = 22, linetype="dashed", color = "red", size=1) + labs(title = "ElbowPlot: Top 22 PCs for UMAP & Clustering")
+```
+
+
+```{r}
+# Clustering & UMAP
+DefaultAssay(F3.filtered.cc) <- "RNA"
+
+F3.filtered.cc <- FindNeighbors(F3.filtered.cc, dims = 1:22, reduction="pca")
+F3.filtered.cc <- FindClusters(F3.filtered.cc, resolution = 0.8)
+F3.filtered.cc <- RunUMAP(F3.filtered.cc, assay = "RNA", reduction = "pca", dims = 1:22)
+```
+
+### Fig. S1D (batch non-corrected)
+```{r}
+DimPlot(F3.filtered.cc, reduction ="umap", group.by="Donors", cols = alpha(brewer.pal(12, "Paired"), 0.4), pt.size = 1, shuffle = T) + labs(title = "")+theme(aspect.ratio = 1)+theme(text = element_text(size=16))
+DimPlot(F3.filtered.cc, reduction ="umap", group.by="cartridges", cols = alpha(brewer.pal(12, "Paired"), 0.4), pt.size = 1, shuffle = T) + labs(title = "")+theme(aspect.ratio = 1)
+```
+
+```{r}
+# Non-cell-cycle-corrected
+F3.filtered <- FindVariableFeatures(F3.filtered)
+F3.filtered <- ScaleData(F3.filtered)
+F3.filtered <- RunPCA(F3.filtered)
+ElbowPlot(F3.filtered)
+```
+
+### Fig. S1B
+```{r}
+# Compare first 2 PCs of non-cc-corrected and cc-corrected
+Idents(F3.filtered) <- "Phase"
+DimPlot(F3.filtered, reduction="pca",cols = "Paired")+theme(aspect.ratio = 1)
+Idents(F3.filtered.cc) <- "Phase"
+DimPlot(F3.filtered.cc, reduction="pca",cols = "Paired")+theme(aspect.ratio = 1)
+```
+
+
+# Integrate donors (batch correction)
+
+## Create normalization function
+```{r}
+normalize.FTC <- function(Seurat){
+  sce <- as.SingleCellExperiment(Seurat)
+# SCE object was created before during the QC
+clusters = quickCluster(sce)
+sce = computeSumFactors(sce, cluster=clusters)
+sce = scuttle::logNormCounts(sce, log = FALSE, pseudo.count=0) # without(!) log transform
+
+# Transform back to Seurat object
+F3.filtered <- as.Seurat(sce, counts = "counts", data = "logcounts")
+Idents(Seurat) <- "Origin_ID"
+
+# Paste log-transform the normalized counts to Seurat object
+#@assays$RNA <- Seurat@assays$originalexp
+Seurat@assays$RNA@data = log1p(x = assay(sce, "normcounts")) # ln(counts+1)
+
+DefaultAssay(Seurat) <- "RNA"
+return(Seurat)
+}
+
+```
+
+
+```{r}
+F3.list <- SplitObject(F3.filtered.cc, split.by = "Donors")
+
+for (i in 1:length(F3.list)){
+
+  
+  F3.list[[i]] <- normalize.FTC(F3.list[[i]])
+  F3.list[[i]] <- FindVariableFeatures(F3.list[[i]], selection.method="vst", nfeatures=2000)
+}
+
+ref.list <- F3.list[c("Donor 1", "Donor 2", "Donor 3")]
+F3.anchors <- FindIntegrationAnchors(object.list = ref.list, dims = 1:30)
+F3.filtered.cc <- IntegrateData(anchorset = F3.anchors, dims = 1:30, features.to.integrate = all.genes)
+
+F3.filtered.cc <- ScaleData(F3.filtered.cc, features = all.genes, vars.to.regress = c("S.Score", "G2M.Score", "percent.mt","nFeature_RNA", "nCount_RNA"))
+
+F3.filtered.cc <- RunPCA(F3.filtered.cc, features = VariableFeatures(F3.filtered.cc), npcs = 50, assay = "integrated")
+ElbowPlot(F3.filtered.cc, ndims = 50)+geom_vline(xintercept = 22, linetype="dashed", color = "red", size=1) + labs(title = "ElbowPlot: Top 22 PCs for UMAP & Clustering")+theme(aspect.ratio = 1)
+
+DefaultAssay(F3.filtered.cc) <- "integrated"
+
+F3.filtered.cc <- FindNeighbors(F3.filtered.cc, dims = 1:22, reduction="pca")
+F3.filtered.cc <- FindClusters(F3.filtered.cc, resolution = 0.8)
+F3.filtered.cc <- RunTSNE(F3.filtered.cc, dims = 1:22, reduction = "pca")
+F3.filtered.cc <- RunUMAP(F3.filtered.cc, assay = "integrated", reduction = "pca", dims = 1:22)
+```
+
+## UMAP - integrated
+### Fig. S1D (batch corrected)
+```{r}
+DefaultAssay(F3.filtered.cc) <- "RNA"
+#UMAP
+DimPlot(F3.filtered.cc, reduction ="umap", group.by="Donors", cols = alpha(brewer.pal(12, "Paired"), 0.4), pt.size = 1, shuffle = T) + labs(title = "")+theme(aspect.ratio = 1)
+DimPlot(F3.filtered.cc, reduction ="umap", group.by="cartridges", cols = alpha(brewer.pal(12, "Paired"), 0.4), pt.size = 1, shuffle = T) + labs(title = "")+theme(aspect.ratio = 1)
+```
+
+# Subseting
+## Multimodal analysis, thresholds
+Subset CD4 and CD8 cells based on CD8A expression (CD4 gene has relatively weaker expression). For explanation of CD8Ahigh and CARhigh look at Charitidis et al., 2019 (https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8546366/)
+
+### Fig. S1E (Histograms)
+```{r}
+DefaultAssay(F3.filtered.cc) <- "RNA"
+Idents(F3.filtered.cc) <- "Numbered.samples"
+
+# CD8A
+data_df_CD8A <- data.frame(Expression=subset(F3.filtered.cc, idents=c("1. Untransduced","2. CD8-LV", "4. VSV-LV"))[["RNA"]]@data["CD8A",]) 
+
+data_df_CD8A %>%
+ggplot(mapping=aes(x=Expression)) +geom_density()
+
+
+density_estimate <- density(data_df_CD8A$Expression)
+plot(density_estimate)
+bw.nrd0(data_df_CD8A$Expression)
+nmodes(data = data_df_CD8A$Expression, bw = bw.nrd0(data_df_CD8A$Expression), full.result = T) # modes number
+
+modetree(data = data_df_CD8A$Expression, bws = c(0.5, 2), display = T)
+summary(modetree(data = data_df_CD8A$Expression, bws = c(0.5, 2), display = T))
+
+locmodes(data_df_CD8A$Expression, mod0=3,lowsup=-Inf,uppsup=Inf,n=2^15,tol=10^(-5),display=T)
+expm1(0.3981823) # Final threshold for subsetting:  Estimated location expm1(higher antimode) =log1p(0.4891155) 
+
+# CAR
+data_df_CAR <- data.frame(Expression=subset(F3.filtered.cc, idents=c("2. CD8-LV", "3. CD4-LV", "4. VSV-LV"))[["RNA"]]@data["CAR",]) 
+
+data_df_CAR %>%
+ggplot(mapping=aes(x=Expression)) +geom_density()
+
+density_estimate <- density(data_df_CAR$Expression)
+plot(density_estimate)
+bw.nrd0(data_df_CAR$Expression)
+nmodes(data = data_df_CAR$Expression, bw = bw.nrd0(data_df_CAR$Expression), full.result = T) # modes number
+
+modetree(data = data_df_CAR$Expression, bws = c(0.5, 2), display = T)
+summary(modetree(data = data_df_CAR$Expression, bws = c(0.5, 2), display = T))
+
+locmodes(data_df_CAR$Expression, mod0=3,lowsup=0,uppsup=5,n=2^15,tol=10^(-5),display=T)
+expm1(1.381277)  # CARhigh = log1p(2.979981)
+```
+
+### Fig. S1E (Violins)
+Violin plots with thresholds
+```{r}
+#CAR log1p(2.979981)
+Idents(F3.filtered.cc) <- "Numbered.samples"
+VlnPlot(F3.filtered.cc, features = "CAR", pt.size = 0.1, cols = brewer.pal(4, "Paired"))+NoLegend()+geom_hline(yintercept = log1p(2.979981), linetype="dashed", colour="darkred", size=1.2)+ylim(NA, 7)+theme(aspect.ratio = 1)
+
+#CD8A log1p(0.4891155)
+Idents(F3.filtered.cc) <- "Numbered.samples"
+VlnPlot(F3.filtered.cc, features = c("CD8A"), pt.size = 0.1, cols = brewer.pal(4, "Paired"))+NoLegend()+geom_hline(yintercept = log1p(0.4891155), linetype="dashed", colour="darkred", size=1.2)+ylim(NA, 4)+theme(aspect.ratio = 1)
+```
+
+### Thresholds to remove B cells
+```{r}
+FeatureScatter(F3.filtered.cc, feature1="CD22", feature2 = "nFeature_RNA", group.by = "Numbered.samples", cols = c("red", "yellow", "green", "blue"))+geom_vline(xintercept = log1p(0.1), linetype="dashed", color = "grey30", size=1)+labs(title = "")
+
+FeatureScatter(F3.filtered.cc, feature1="CD19", feature2 = "nFeature_RNA", group.by = "Numbered.samples", cols = c("red", "yellow", "green", "blue"))+geom_vline(xintercept = log1p(0.1), linetype="dashed", color = "grey30", size=1)+labs(title = "")
+
+FeatureScatter(F3.filtered.cc, feature1="MS4A1", feature2 = "nFeature_RNA", group.by = "Numbered.samples", cols = c("red", "yellow", "green", "blue"))+geom_vline(xintercept = log1p(0.1), linetype="dashed", color = "grey30", size=1)+labs(title = "")
+
+FeatureScatter(F3.filtered.cc, feature1="BASP1", feature2 = "nFeature_RNA", group.by = "Numbered.samples", cols = c("red", "yellow", "green", "blue"))+geom_vline(xintercept = log1p(0.1), linetype="dashed", color = "grey30", size=1)+labs(title = "")
+```
+
+
+## Create/subset F3.CD8 object
+```{r}
+Idents(F3.filtered.cc) <- "Numbered.samples"
+# Subset CD8 cells
+CD8cells <- subset(F3.filtered.cc, idents=c("1. Untransduced", "2. CD8-LV", "4. VSV-LV"), CD8A > log1p(0.4891155))
+# CAR positive
+CD8CARpos <- subset(CD8cells, idents=c("2. CD8-LV", "4. VSV-LV"),CAR > log1p(2.979981))
+
+CD8CARpos[["CD8CAR"]] <- Idents(CD8CARpos)
+CD8CAR <- c("4. CD8-LV CAR+", "5. VSV-LV CAR+")
+names(CD8CAR) <- levels(CD8CARpos)
+Idents(CD8CARpos) <- "CD8CAR"
+CD8CARpos <- RenameIdents(CD8CARpos, CD8CAR)
+CD8CARpos$CD8CAR <- Idents(CD8CARpos)
+levels(CD8CARpos)
+
+# CAR negative
+CD8CARneg <- subset(CD8cells, idents=c("1. Untransduced","2. CD8-LV", "4. VSV-LV"),CAR <= log1p(2.979981))
+
+CD8CARneg[["CD8CAR"]] <- Idents(CD8CARneg)
+CD8CAR <- c("1. Untransduced", "2. CD8-LV CAR-", "3. VSV-LV CAR-")
+names(CD8CAR) <- levels(CD8CARneg)
+Idents(CD8CARneg) <- "CD8CAR"
+CD8CARneg <- RenameIdents(CD8CARneg, CD8CAR)
+CD8CARneg$CD8CAR <- Idents(CD8CARneg)
+levels(CD8CARneg)
+
+F3.CD8 <- merge(CD8CARneg, CD8CARpos)
+levels(F3.CD8)
+
+# Exclude any possible B cells
+F3.CD8 <- subset(F3.CD8, CD22 < log1p(0.1) & CD19 < log1p(0.1) & MS4A1 < log1p(0.1) & BASP1 < log1p(0.1))
+
+# Number of cells per condition
+table(F3.CD8$CD8CAR)
+table(Idents(F3.CD8), F3.CD8$Donors)
+
+VlnPlot(F3.CD8, features = "CAR", cols = brewer.pal(5, "Paired"), pt.size = 0.1)+NoLegend()+xlab("")+theme(plot.subtitle = element_text(hjust = 0.5, size = 15), plot.title = element_text(size = 20))+geom_hline(yintercept = log1p(2.979981), linetype="dashed", colour="grey40", size=1)+geom_hline(yintercept = log1p(2.998739), linetype="dashed", colour="grey40", size=1)+ylim(NA, 6)
+
+Idents(F3.CD8) <- "CD8CAR"
+```
+
+## Create/subset F3.CD4 object
+```{r}
+Idents(F3.filtered.cc) <- "Numbered.samples"
+# Subset CD8 cells
+CD4cells <- subset(F3.filtered.cc, idents=c("1. Untransduced", "3. CD4-LV", "4. VSV-LV"), CD8A <= log1p(0.4891155))
+# CAR positive
+CD4CARpos <- subset(CD4cells, idents=c("3. CD4-LV", "4. VSV-LV"), CAR > log1p(2.979981))
+
+CD4CARpos[["CD4CAR"]] <- Idents(CD4CARpos)
+CD4CAR <- c("4. CD4-LV CAR+", "5. VSV-LV CAR+")
+names(CD4CAR) <- levels(CD4CARpos)
+Idents(CD4CARpos) <- "CD4CAR"
+CD4CARpos <- RenameIdents(CD4CARpos, CD4CAR)
+CD4CARpos$CD4CAR <- Idents(CD4CARpos)
+levels(CD4CARpos)
+
+# CAR negative
+CD4CARneg <- subset(CD4cells, idents=c("1. Untransduced","3. CD4-LV", "4. VSV-LV"),CAR <= log1p(2.979981))
+
+CD4CARneg[["CD4CAR"]] <- Idents(CD4CARneg)
+CD4CAR <- c("1. Untransduced", "2. CD4-LV CAR-", "3. VSV-LV CAR-")
+names(CD4CAR) <- levels(CD4CARneg)
+Idents(CD4CARneg) <- "CD4CAR"
+CD4CARneg <- RenameIdents(CD4CARneg, CD4CAR)
+CD4CARneg$CD4CAR <- Idents(CD4CARneg)
+levels(CD4CARneg)
+
+F3.CD4 <- merge(CD4CARneg, CD4CARpos)
+levels(F3.CD4)
+
+# Exclude any possible B cells
+F3.CD4 <- subset(F3.CD4, CD22 < log1p(0.1) & CD19 < log1p(0.1) & MS4A1 < log1p(0.1) & BASP1 < log1p(0.1))
+
+# Number of cells per condition
+table(F3.CD4$CD4CAR)
+table(Idents(F3.CD4), F3.CD4$Donors)
+
+VlnPlot(F3.CD4, features = "CAR", cols = brewer.pal(5, "Paired"), pt.size = 0.1)+NoLegend()+xlab("")+theme(plot.subtitle = element_text(hjust = 0.5, size = 15), plot.title = element_text(size = 20))+geom_hline(yintercept = log1p(2.979981), linetype="dashed", colour="grey40", size=1)+geom_hline(yintercept = log1p(2.998739), linetype="dashed", colour="grey40", size=1)+ylim(NA, 6)
+
+Idents(F3.CD4) <- "CD4CAR"
+```
+
+Remove unwanted objects
+```{r, error=TRUE}
+remove(Ut_1,Ut_2, Ut_3,CD8_1,CD8_2, CD8_3,CD4_1, CD4_2, CD4_3,VSVG_1,VSVG_2,VSVG_3,CD8CARneg,CD8CARpos, CD4CARneg,CD4CARpos, Donors_2_3, F3.Ut, F3.VSV, TagsDonors_2_3,Untransduced_1, Untransduced_2, Untransduced_3, Untransduced_2_cells, Untransduced_3_cells, CD4_LV_1, CD4_LV_2, CD4_LV_3, CD4_LV_2_cells, CD4_LV_3_cells, CD8_LV_1, CD8_LV_2, CD8_LV_3,CD8_LV_2_cells, CD8_LV_3_cells, VSVG_LV_1, VSVG_LV_2,VSVG_LV_3, VSVG_LV_2_cells, VSVG_LV_3_cells, CD4cells, CD8cells)
+```
+
+
+# Downstream analysis
+
+## F3.CD8 object
+```{r}
+# Integration
+F3.list <- SplitObject(F3.CD8, split.by = "Donors")
+
+for (i in 1:length(F3.list)){
+
+  
+  F3.list[[i]] <- normalize.FTC(F3.list[[i]])
+  F3.list[[i]] <- FindVariableFeatures(F3.list[[i]], selection.method="vst", nfeatures=2000)
+}
+
+ref.list <- F3.list[c("Donor 1", "Donor 2", "Donor 3")]
+F3.anchors <- FindIntegrationAnchors(object.list = ref.list, dims = 1:30)
+F3.CD8 <- IntegrateData(anchorset = F3.anchors, dims = 1:30, features.to.integrate = all.genes)
+
+F3.CD8 <- ScaleData(F3.CD8, features = all.genes, vars.to.regress = c("S.Score", "G2M.Score", "percent.mt","nFeature_RNA", "nCount_RNA"))
+
+F3.CD8 <- RunPCA(F3.CD8, features = VariableFeatures(F3.CD8), npcs = 50, assay = "integrated")
+ElbowPlot(F3.CD8, ndims = 50)+geom_vline(xintercept = 22, linetype="dashed", color = "red", size=1) + labs(title = "ElbowPlot: Top 22 PCs for UMAP & Clustering")
+
+DefaultAssay(F3.CD8) <- "integrated"
+
+F3.CD8 <- FindNeighbors(F3.CD8, dims = 1:22, reduction="pca")
+F3.CD8 <- FindClusters(F3.CD8, resolution = 0.8)
+F3.CD8 <- RunTSNE(F3.CD8, dims = 1:22, reduction = "pca")
+F3.CD8 <- RunUMAP(F3.CD8, assay = "integrated", reduction = "pca", dims = 1:22)
+
+# Cluster cells
+F3.CD8 <- FindNeighbors(F3.CD8, dims = 1:22, reduction="pca")
+F3.CD8 <- FindClusters(F3.CD8, resolution = 0.8)
+
+# Find and export all markers
+DefaultAssay(F3.CD8) <- "RNA"
+Idents(F3.CD8) <- "CD8CAR"
+F3.CD8.markers <- FindAllMarkers(F3.CD8, only.pos = FALSE, logfc.threshold = 0.2, assay = "RNA", test.use = "wilcox", verbose = TRUE)
+# Replace Bonferroni p-value correction with FDR 
+F3.CD8.markers$p_val_adj <- NULL
+F3.CD8.markers$FDR <- p.adjust(F3.CD8.markers$p_val, method = "BH")
+F3.CD8.markers <- full.gene.names(F3.CD8.markers)
+
+# Export DGEA
+xlsx::write.xlsx(F3.CD8.markers, file = "~/F3.CD8.markers.xlsx", sheetName = "F3.CD8.markers", append = T)
+
+# Table of cells per group
+print("Cell number across groups")
+table(F3.CD8$CD8CAR)
+table(Idents(F3.CD8), F3.CD8$Donors)
+
+# Frequency of CAR T cells
+Idents(F3.filtered.cc) <- "Numbered.samples"
+print("Frequency of cell groups out of parental T cell type")
+table(F3.CD8$CD8CAR)[2:3]/table(subset(F3.filtered.cc, idents = c("2. CD8-LV", "4. VSV-LV"), CD8A > log1p(0.4891155))$Numbered.samples)[c(2,4)]*100
+table(F3.CD8$CD8CAR)[4:5]/table(subset(F3.filtered.cc, idents = c("2. CD8-LV", "4. VSV-LV"), CD8A > log1p(0.4891155))$Numbered.samples)[c(2,4)]*100
+
+# CAR-Transgene expression among the groups
+VlnPlot(F3.CD8, pt.size = 0.1, features = "CAR")+NoLegend()
+```
+## F3.CD4 object
+```{r}
+# Integration
+F3.list <- SplitObject(F3.CD4, split.by = "Donors")
+
+for (i in 1:length(F3.list)){
+
+  
+  F3.list[[i]] <- normalize.FTC(F3.list[[i]])
+  F3.list[[i]] <- FindVariableFeatures(F3.list[[i]], selection.method="vst", nfeatures=2000)
+}
+
+ref.list <- F3.list[c("Donor 1", "Donor 2", "Donor 3")]
+F3.anchors <- FindIntegrationAnchors(object.list = ref.list, dims = 1:30)
+F3.CD4 <- IntegrateData(anchorset = F3.anchors, dims = 1:30, features.to.integrate = all.genes)
+
+F3.CD4 <- ScaleData(F3.CD4, features = all.genes, vars.to.regress = c("S.Score", "G2M.Score", "percent.mt","nFeature_RNA", "nCount_RNA"))
+
+F3.CD4 <- RunPCA(F3.CD4, features = VariableFeatures(F3.CD4), npcs = 50, assay = "integrated")
+ElbowPlot(F3.CD4, ndims = 50)+geom_vline(xintercept = 22, linetype="dashed", color = "red", size=1) + labs(title = "ElbowPlot: Top 22 PCs for UMAP & Clustering")
+
+DefaultAssay(F3.CD4) <- "integrated"
+
+F3.CD4 <- FindNeighbors(F3.CD4, dims = 1:22, reduction="pca")
+F3.CD4 <- FindClusters(F3.CD4, resolution = 0.8)
+F3.CD4 <- RunUMAP(F3.CD4, assay = "integrated", reduction = "pca", dims = 1:22)
+
+# Cluster cells
+F3.CD4 <- FindNeighbors(F3.CD4, dims = 1:22, reduction="pca")
+F3.CD4 <- FindClusters(F3.CD4, resolution = 0.8)
+
+# Differential gene expression analysis
+DefaultAssay(F3.CD4) <- "RNA"
+Idents(F3.CD4) <- "CD4CAR"
+F3.CD4.markers <- FindAllMarkers(F3.CD4, only.pos = FALSE, logfc.threshold = 0.2, assay = "RNA", test.use = "wilcox", verbose = TRUE)
+# Replace Bonferroni p-value correction with FDR 
+F3.CD4.markers$p_val_adj <- NULL
+F3.CD4.markers$FDR <- p.adjust(F3.CD4.markers$p_val, method = "BH")
+F3.CD4.markers <- full.gene.names(F3.CD4.markers)
+
+# Export DGEA
+xlsx::write.xlsx(F3.CD4.markers, file = "~/F3.CD4.markers.xlsx", sheetName = "F3.CD4.markers", append = T)
+
+# Table of cells per group
+print("Cell number across groups")
+table(F3.CD4$CD4CAR)
+
+# Frequency of CAR T cells
+print("Frequency of cell groups out of parental T cell type")
+table(F3.CD4$CD4CAR)[2:3]/table(subset(F3.filtered.cc, idents = c("3. CD4-LV", "4. VSV-LV"), CD8A <= log1p(0.4891155))$Numbered.samples)[c(3,4)]*100
+table(F3.CD4$CD4CAR)[4:5]/table(subset(F3.filtered.cc, idents = c("3. CD4-LV", "4. VSV-LV"), CD8A <=  log1p(0.4891155))$Numbered.samples)[c(3,4)]*100
+
+# CAR-Transgene expression among the groups
+VlnPlot(F3.CD4, pt.size = 0.1, features = "CAR")+NoLegend()
+```
+
+### Fig. 1B
+```{r}
+colorblind_vector <- c("plum3", "yellow","blue","red", "black")
+
+# Export 6x6
+## F3.filtered.cc
+DimPlot(F3.filtered.cc, reduction ="umap", group.by="Numbered.samples", cols = "Paired", pt.size = 0.5, shuffle = T) + labs(title = "")+theme(aspect.ratio = 1)
+## CD8
+DimPlot(F3.CD8, reduction ="umap", group.by="CD8CAR", cols = "Paired", pt.size = 1, shuffle = T) + labs(title = "")+theme(aspect.ratio = 1)
+## CD4
+DimPlot(F3.CD4, reduction ="umap", group.by="CD4CAR", cols = "Paired", pt.size = 1, shuffle = T) + labs(title = "")+theme(aspect.ratio = 1)
+```
+
+## F3.Ut.allCAR object
+```{r}
+Idents(F3.filtered.cc) <- "Numbered.samples"
+
+# Subset CD8/CD4 cells
+Ut <- subset(F3.filtered.cc, idents="1. Untransduced")
+CD8LV <- subset(F3.filtered.cc, idents=c("2. CD8-LV"), CD8A > log1p(0.4891155))
+CD4LV <- subset(F3.filtered.cc, idents=c("3. CD4-LV"), CD8A <= log1p(0.4891155))
+VSVLV <- subset(F3.filtered.cc, idents=c("4. VSV-LV"))
+
+# Renaming idents/metadata CAR log1p(2.979981), CD8A log1p(0.4891155)
+cells <- WhichCells(Ut, expression=`CD8A` > log1p(0.4891155))
+Ut@meta.data$CAR <- ifelse(rownames(Ut@meta.data) %in% cells, "1. Ctrl CD8", "2. Ctrl CD4")
+
+cells <- WhichCells(CD8LV, expression=`CAR` <= log1p(2.979981))
+CD8LV@meta.data$CAR <- ifelse(rownames(CD8LV@meta.data) %in% cells, "3. CD8-LV CAR-", "4. CD8-LV CAR+")
+
+cells <- WhichCells(CD4LV, expression=`CAR` <= log1p(2.979981))
+CD4LV@meta.data$CAR <- ifelse(rownames(CD4LV@meta.data) %in% cells, "5. CD4-LV CAR-", "6. CD4-LV CAR+")
+
+cells <- WhichCells(VSVLV, expression=`CAR` <= log1p(2.979981))
+VSVLV@meta.data$CAR <- ifelse(rownames(VSVLV@meta.data) %in% cells, "7. VSV-LV CAR-", "8. VSV-LV CAR+")
+
+F3.Ut.allCAR <- merge(Ut, c(CD8LV, CD4LV, VSVLV))
+levels(F3.Ut.allCAR)
+
+remove(Ut, CD8LV, CD4LV, VSVLV)
+
+# Exclude any possible B cells
+F3.Ut.allCAR <- subset(F3.Ut.allCAR, CD22 < log1p(0.1) & CD19 < log1p(0.1) & MS4A1 < log1p(0.1) & BASP1 < log1p(0.1))
+
+# Number of cells per condition
+table(F3.Ut.allCAR$CAR)
+table(Idents(F3.Ut.allCAR), F3.Ut.allCAR$Donors)
+```
+
+## Total CAR+- object
+```{r}
+F3.CAR <- subset(F3.filtered.cc, idents = c("2. CD8-LV", "3. CD4-LV", "4. VSV-LV"))
+cells <- WhichCells(F3.CAR, expression=`CAR` > log1p(2.979981))
+
+F3.CAR@meta.data$CAR <- ifelse(rownames(F3.CAR@meta.data) %in% cells, "CAR+", "CAR-")
+
+Idents(F3.CAR) <- "CAR"
+DefaultAssay(F3.CAR) <- "RNA"
+
+# DGEA
+CART.CD4CD8.markers <- FindMarkers(F3.CAR, logfc.threshold = 0, ident.2 = "CAR-", ident.1 = "CAR+")
+CART.CD4CD8.markers$gene <- rownames(CART.CD4CD8.markers)
+# Replace Bonferroni adjusted p-value with FDR
+CART.CD4CD8.markers$p_val_adj <- NULL
+CART.CD4CD8.markers$FDR <- p.adjust(CART.CD4CD8.markers$p_val, method = "BH")
+CART.CD4CD8.markers <- full.gene.names(CART.CD4CD8.markers)
+
+gc()
+xlsx::write.xlsx(CART.CD4CD8.markers, file = "~/CART.CD4CD8.markers.xlsx", sheetName = "CART.CD4CD8.markers", append = F)
+gc()
+```
+
+### Fig. S3B
+```{r, fig.height=5, fig.width=5}
+# Total CAR+ vs CAR-
+EnhancedVolcano(CART.CD4CD8.markers, lab=rownames(CART.CD4CD8.markers), x ="avg_log2FC", y ="FDR", FCcutoff = 0.2,legendPosition = "bottom", subtitle = NULL, cutoffLineType="blank", legendLabels=c("n.s.", "|log2FC|>0.2", "FDR \u2264 0.05", "FDR \u2264 0.05 & |log2FC|>0.2"), pCutoff = 0.05,ylab = bquote(~-Log[10] ~ italic(FDR)))+xlim(-1,1)+theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5))+labs(title = "CAR+ vs. CAR-")
+```
+
+### Heatmaps - Fig 1C
+```{r}
+# CD8 averaging and heatmap
+all.genes.CD8 <- rownames(F3.CD8@assays$RNA@data)
+Idents(F3.CD8) <- "CD8CAR"
+data <- F3.CD8
+data$orig.ident <- NULL
+data$ident <- NULL
+data$origin.ident <- data$CD8CAR
+F3.CD8.averages <- AverageExpression(data, return.seurat = TRUE, assays = "RNA", features = all.genes.CD8)
+remove(data)
+
+DoHeatmap(F3.CD8.averages, features = unlist(subset(F3.CD8.markers %>% group_by(cluster)%>% arrange(desc(avg_log2FC > 0)), FDR < 0.05)), size = 4, angle = 60, draw.lines = FALSE, group.colors = brewer.pal(5, "Paired")) + theme(axis.text.y = element_text(size = 3)) + ylab( "")+theme(plot.margin = margin(1,0,0,0,"cm"))+scale_fill_viridis_c(name = "Z-score")
+
+# CD4 averaging and heatmap
+all.genes.CD4 <- rownames(F3.CD4@assays$RNA@data)
+Idents(F3.CD4) <- "CD4CAR"
+data <- F3.CD4
+data$orig.ident <- NULL
+data$ident <- NULL
+data$origin.ident <- data$CD4CAR
+F3.CD4.averages <- AverageExpression(data, return.seurat = TRUE, assays = "RNA", features = all.genes.CD4)
+remove(data)
+
+DoHeatmap(F3.CD4.averages, features = unlist(subset(F3.CD4.markers %>% group_by(cluster) %>% arrange(desc(avg_log2FC > 0)), FDR < 0.05)), size = 4, angle = 60, draw.lines = FALSE, group.colors = brewer.pal(5, "Paired")) + theme(axis.text.y = element_text(size = 3)) + ylab( "")+theme(plot.margin = margin(1,0,0,0,"cm"))+scale_fill_viridis_c(name = "Z-score")
+```
+
+
+# Volcano plots
+
+DGEA of CD8 cells
+```{r}
+# CD8-LV CAR- vs CAR+
+i2.1 <- FindMarkers(F3.CD8, logfc.threshold = 0, only.pos = F,ident.2 = "2. CD8-LV CAR-", ident.1 = "4. CD8-LV CAR+", test.use = "wilcox")
+# Replace Bonferroni adjusted p-value with FDR
+i2.1$p_val_adj <- NULL
+i2.1$FDR <- p.adjust(i2.1$p_val, method = "BH")
+i2.1$gene <- rownames(i2.1)
+i2.1 <- full.gene.names(i2.1)
+
+# VSV-LV CAR- vs CAR+
+i2.2 <- FindMarkers(F3.CD8, logfc.threshold = 0, only.pos = F,ident.2 = "3. VSV-LV CAR-", ident.1 = "5. VSV-LV CAR+", test.use = "wilcox")
+# Replace Bonferroni adjusted p-value with FDR
+i2.2$p_val_adj <- NULL
+i2.2$FDR <- p.adjust(i2.2$p_val, method = "BH")
+i2.2$gene <- rownames(i2.2)
+i2.2 <- full.gene.names(i2.2)
+
+# CAR- vs CAR+
+i2.3 <- FindMarkers(F3.CD8, logfc.threshold = 0, only.pos = F,ident.2 = c("2. CD8-LV CAR-","3. VSV-LV CAR-"), ident.1 = c("4. CD8-LV CAR+","5. VSV-LV CAR+"), test.use = "wilcox")
+# Replace Bonferroni adjusted p-value with FDR
+i2.3$p_val_adj <- NULL
+i2.3$FDR <- p.adjust(i2.3$p_val, method = "BH")
+i2.3$gene <- rownames(i2.3)
+i2.3 <- full.gene.names(i2.3)
+
+# Export
+gc()
+xlsx::write.xlsx(i2.1, file = "~/F3.CD8.markers.xlsx", sheetName = "CD8-LV CAR- vs CAR+ (no log2FC threshold)", append = T)
+xlsx::write.xlsx(i2.2, file = "~/F3.CD8.markers.xlsx", sheetName = "VSV-LV CAR- vs CAR+ (no log2FC threshold)", append = T)
+gc()
+xlsx::write.xlsx(i2.3, file = "~/F3.CD8.markers.xlsx", sheetName = "CD8-LV and VSV-LV CAR- vs CAR+ (no log2FC threshold)", append = T)
+gc()
+```
+
+DGEA of CD4 cells
+```{r}
+# CD4-LV CAR- vs CAR+
+i3.1 <- FindMarkers(F3.CD4, logfc.threshold = 0, only.pos = F,ident.2 = "2. CD4-LV CAR-", ident.1 = "4. CD4-LV CAR+", test.use = "wilcox")
+# Replace Bonferroni adjusted p-value with FDR
+i3.1$p_val_adj <- NULL
+i3.1$FDR <- p.adjust(i3.1$p_val, method = "BH")
+i3.1$gene <- rownames(i3.1)
+i3.1 <- full.gene.names(i3.1)
+
+# VSV-LV CAR- vs CAR+
+i3.2 <- FindMarkers(F3.CD4, logfc.threshold = 0, only.pos = F,ident.2 = "3. VSV-LV CAR-", ident.1 = "5. VSV-LV CAR+", test.use = "wilcox")
+# Replace Bonferroni adjusted p-value with FDR
+i3.2$p_val_adj <- NULL
+i3.2$FDR <- p.adjust(i3.2$p_val, method = "BH")
+i3.2$gene <- rownames(i3.2)
+i3.2 <- full.gene.names(i3.2)
+
+# CAR- vs CAR+
+i3.3 <- FindMarkers(F3.CD4, logfc.threshold = 0, only.pos = F,ident.2 = c("2. CD4-LV CAR-","3. VSV-LV CAR-"), ident.1 = c("4. CD4-LV CAR+","5. VSV-LV CAR+"), test.use = "wilcox")
+# Replace Bonferroni adjusted p-value with FDR
+i3.3$p_val_adj <- NULL
+i3.3$FDR <- p.adjust(i3.3$p_val, method = "BH")
+i3.3$gene <- rownames(i3.3)
+i3.3 <- full.gene.names(i3.3)
+
+# Export
+gc()
+xlsx::write.xlsx(i2.1, file = "~/F3.CD4.markers.xlsx", sheetName = "CD4-LV CAR- vs CAR+ (no log2FC threshold)", append = T)
+xlsx::write.xlsx(i2.2, file = "~/F3.CD4.markers.xlsx", sheetName = "VSV-LV CAR- vs CAR+ (no log2FC threshold)", append = T)
+gc()
+xlsx::write.xlsx(i2.3, file = "~/F3.CD4.markers.xlsx", sheetName = "CD4-LV and VSV-LV CAR- vs CAR+ (no log2FC threshold)", append = T)
+gc()
+```
+
+### Fig. 2A
+```{r}
+# Save landscape A4
+ggarrange(EnhancedVolcano(i2.1, rownames(i2.1), x ="avg_log2FC", y ="FDR", FCcutoff = 0.2,legendPosition = "bottom", subtitle = NULL, cutoffLineType="blank", labFace = "italic", labSize = 4,legendLabels=c("ns", "|log2FC|>0.2", "FDR<0.05", "FDR<0.05 & |log2FC|>0.2"), pCutoff = 0.05,ylab = bquote(~-Log[10] ~ italic(FDR)))+xlim(-1,1)+theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5))+labs(title = "CD8-LV: CAR+ vs CAR-")+theme(aspect.ratio = 0.5),
+          EnhancedVolcano(i3.1, rownames(i3.1), x ="avg_log2FC", y ="FDR", FCcutoff = 0.2,legendPosition = "bottom", subtitle = NULL, cutoffLineType="blank", labFace = "italic", labSize = 4,legendLabels=c("ns", "|log2FC|>0.2", "FDR<0.05", "FDR<0.05 & |log2FC|>0.2"), pCutoff = 0.05,ylab = bquote(~-Log[10] ~ italic(FDR)))+xlim(-1,1)+theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5))+labs(title = "CD4-LV: CAR+ vs CAR-")+theme(aspect.ratio = 0.5),
+          EnhancedVolcano(i2.2, rownames(i2.2), x ="avg_log2FC", y ="FDR", FCcutoff = 0.2,legendPosition = "bottom", subtitle = NULL, cutoffLineType="blank", labFace = "italic", labSize = 4,legendLabels=c("ns", "|log2FC|>0.2", "FDR<0.05", "FDR<0.05 & |log2FC|>0.2"), pCutoff = 0.05,ylab = bquote(~-Log[10] ~ italic(FDR)))+xlim(-1,1)+ylim(NA,50)+theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5))+labs(title = "VSV-LV (CD8): CAR+ vs CAR-")+theme(aspect.ratio = 0.5),
+          EnhancedVolcano(i3.2, rownames(i3.2), x ="avg_log2FC", y ="FDR", FCcutoff = 0.2,legendPosition = "bottom", subtitle = NULL, cutoffLineType="blank", labFace = "italic", labSize = 4, legendLabels=c("ns", "|log2FC|>0.2", "FDR<0.05", "FDR<0.05 & |log2FC|>0.2"), pCutoff = 0.05,ylab = bquote(~-Log[10] ~ italic(FDR)))+xlim(-1,1)+theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5))+labs(title = "VSV-LV (CD4): CAR+ vs CAR-")+theme(aspect.ratio = 0.5),
+          common.legend = T, legend = "bottom", ncol = 2, nrow = 2)
+```
+
+# Violin plots
+
+## Fig. 2C
+```{r}
+# Genes to plot
+gene <- c(
+  # Antiviral
+ "IFITM1", "IFITM2", "IFITM3", "LY6E", "SAMHD1", "PARP9", "ISG20", "ADA2", "MX1", "TRIM22", "STAT1", "IRF1", "GBP1", "IFI6", "IFI44L", "SAMD9L",
+  # Naive - quiescence
+  "IL7R", "RIPOR2","AES", "PIK3IP1", "BTN3A2",
+ #Apoptosis
+"CASP4","STK17B", "SHISA5", "CYFIP2",
+# Viral entry
+"PPIA", "KPNA2",
+# Oxidative stress
+  "TXNIP", "PRDX1", "PRDX2", "SOD1", "GSTO1")
+```
+
+```{r}
+vln_df_CAR <- list()
+ plot_list_vln_CAR <- list()
+ pwc <- list()
+ p.val.size <- 5
+ plot.title.size <- 16
+ set.seed(42)
+mycolors <- c("darkred", "darkblue")
+ 
+for(i in gene){
+ 
+#  violin plot without noise
+vln_df_CAR[[i]] = data.frame(Expression=F3.CAR[["RNA"]]@data[i,], Subset = F3.CAR$CAR)
+
+# Add_xy_position: the test helps only to set the y position of the later retrieved FDR values from the DGEA
+pwc[[i]] <- vln_df_CAR[[i]] %>% 
+  wilcox_test(Expression ~ Subset)
+pwc[[i]] <- pwc[[i]] %>% add_xy_position(x = "Subset")
+}
+
+# Retrieve FDR values 
+test <- do.call(rbind, unname(Map(cbind, id = names(pwc), pwc))) %>% add_column(FDR=NA)
+
+for(i in gene){
+  test[match(i, test$id),]$FDR <- CART.CD4CD8.markers[i,]$FDR 
+}
+  test <- add_significance(test, p.col = "FDR", output.col = "FDR.signif")
+
+# Pass back to the list
+pwc <- list()
+for(i in 1:nrow(test)) {             
+  pwc[[i]] <- test[i,]
+}
+names(pwc) <- test[,1]
+
+# Graphs
+for(i in gene){
+# Add noise for optimal visualization purposes like VlnPlot() from Seurat
+noise <- rnorm(n = length(x = vln_df_CAR[[i]][, "Expression"])) / 100000
+vln_df_CAR[[i]]$Expression <- vln_df_CAR[[i]]$Expression  + noise
+
+# Variable stats position
+y.position <- max(vln_df_CAR[[i]]$Expression)+0.5
+
+# Variable ylim range
+ylim <- ylim(0, max(y.position)+0.1)
+
+# violin plot with noise
+if(i != gene[length(gene)]){
+  plot_list_vln_CAR[[i]] <- vln_df_CAR[[i]] %>%
+ggplot(mapping=aes(x=Subset, y=Expression)) + geom_violin(mapping=aes(x=Subset, y=Expression, fill=Subset),scale = "width")+scale_fill_manual(values = alpha((mycolors),0.7))+ geom_boxplot(outlier.size = 0.01, width=0.3, size=0.5, alpha=0.4) + 
+    theme_bw()+
+  xlab("") +
+  ggtitle(label=i) +
+  stat_pvalue_manual(pwc[[i]],  hide.ns = F, y.position =  y.position, label = "FDR.signif", size = p.val.size, tip.length = 0)+ylim +
+  theme(aspect.ratio = 1, panel.grid = element_blank(),axis.title.y = element_text(size = 13), axis.text.y = element_text(size=13), axis.text.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5, size=plot.title.size, face = "bold"), plot.subtitle = element_text(size = 13))+ylab("Expression")+ theme(legend.position = "none")
+}
+# Add legend to the last plot
+else{plot_list_vln_CAR[[i]] <- vln_df_CAR[[i]] %>%
+ggplot(mapping=aes(x=Subset, y=Expression)) + geom_violin(mapping=aes(x=Subset, y=Expression, fill=Subset),scale = "width")+scale_fill_manual(values = alpha((mycolors),0.7))+ geom_boxplot(outlier.size = 0.01, width=0.3, size=0.5, alpha=0.4) + 
+    theme_bw()+
+  xlab("") +
+  ggtitle(label=i) +
+  stat_pvalue_manual(pwc[[i]],  hide.ns = F, y.position =  y.position, label = "FDR.signif", size = p.val.size, tip.length = 0)+ylim +
+  theme(aspect.ratio = 1, panel.grid = element_blank(),axis.title.y = element_text(size = 13), axis.text.y = element_text(size=13), axis.text.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5, size=plot.title.size, face = "bold"), plot.subtitle = element_text(size = 13)) +
+  theme(legend.title = element_text(size = 13), legend.text = element_text(size = 13), legend.key.size = unit(0.5, "cm"))+ylab("Expression")
+}
+}
+```
+
+```{r}
+# Set the factor "f" to adjust the size of the exported pdf, f=2.4,col=5, w=13
+f = 2.4
+w = 13
+col = 5
+h = f*if(length(gene)==any(seq(col,length(gene),by=col))){length(gene)} else{(length(gene)/col)+1}
+n = if(length(gene)==any(seq(col,length(gene),by=col))){length(gene)/col} else{(length(gene)/col)+1}
+
+ggsave("~/Violins Fig 2C.pdf", plot=ggarrange(plotlist=plot_list_vln_CAR, ncol = col, nrow=n, common.legend = T, legend = "right"), width = w, height = h, limitsize = F)
+```
+
+
+## Fig. S5
+
+List to compare groups
+```{r}
+# For F3.Ut.allCAR
+compare.F3.Ut.allCAR <- list(c("1. Ctrl CD8", "2. Ctrl CD4"), c("3. CD8-LV CAR-", "4. CD8-LV CAR+"), c("5. CD4-LV CAR-", "6. CD4-LV CAR+"), c("7. VSV-LV CAR-", "8. VSV-LV CAR+"))
+```
+
+```{r}
+# Final for F3.Ut.allCAR (|log2FC| > 0.2, FDR < 0.05) - alphabetical order (filtered) - found in file: "Unique upregulate in CAR- all comparisons.xlsx" & "Unique upregulate in CAR+ all comparisons.xlsx" 
+gene <- c(
+  # Antiviral
+  "ADA2", "ADAR", "EEF1D","EIF2AK2", "GBP1", "GBP2", "IFI44L", "IFI6", "IFIH1", "IFITM1", "IFITM2", "IFITM3", "IRF1", "ISG20", "LY6E", "MX1", "OAS1","OAS2", "PARP9","SAMD9L", "SAMHD1", "SP110", "STAT1", "TRIM22",
+  # Viral entry
+  "KPNA2", "PPIA",
+  # Oxidative stress
+  "GSTO1", "GSTP1", "PARK7", "PRDX1", "PRDX2", "PRDX3", "SOD1", "TXNIP",
+  # Apoptosis
+  "CASP4", "CYFIP2" , "SHISA5", "STK17B", "TMEM123", "XAF1",
+  # Naive - quiescence
+  "AES", "BTG1", "BTN3A2", "IL7R", "RIPOR2", "SATB1", "SELL","ZFP36L2")
+```
+
+```{r}
+# Add_xy_position: the test helps only to set the y position of the later retrieved FDR values from the DGEA
+pwc[[i]] <- vln_df_CAR[[i]] %>% 
+  wilcox_test(Expression ~ Subset)
+pwc[[i]] <- pwc[[i]] %>% add_xy_position(x = "Subset")
+}
+
+# Retrieve FDR values 
+test <- do.call(rbind, unname(Map(cbind, id = names(pwc), pwc))) %>% add_column(FDR=NA)
+
+for(i in gene){
+  test[match(i, test$id),]$FDR <- CART.CD4CD8.markers[i,]$FDR 
+}
+  test <- add_significance(test, p.col = "FDR", output.col = "FDR.signif")
+
+# Pass back to the list
+pwc <- list()
+for(i in 1:nrow(test)) {             
+  pwc[[i]] <- test[i,]
+}
+names(pwc) <- test[,1]
+```
+
+
+#### Multiple genes (updated stats)
+```{r}
+vln_df_F3.Ut.allCAR <- list()
+ plot_list_vln_F3.Ut.allCAR <- list()
+ pwc <- list()
+ p.val.size <- 3
+ plot.title.size <- 13
+ set.seed(42)
+mycolors <- brewer.pal(8, "Paired")
+ 
+for(i in gene){
+ 
+#  violin plot without noise
+vln_df_F3.Ut.allCAR[[i]] = data.frame(Expression=F3.Ut.allCAR[["RNA"]]@data[i,], Subset = F3.Ut.allCAR$CAR)
+
+# Statistics
+pwc[[i]] <- vln_df_F3.Ut.allCAR[[i]] %>% 
+  wilcox_test(Expression ~ Subset, p.adjust.method = "none", comparisons = compare.F3.Ut.allCAR)
+pwc[[i]] <- pwc[[i]] %>% add_xy_position(x = "Subset")
+pwc[[i]]$FDR <- p.adjust(pwc[[i]]$p, method = "BH", n=length(gene))
+pwc[[i]] <- add_significance(pwc[[i]], p.col = "FDR", output.col = "FDR.signif")
+
+
+
+
+
+
+
+# Graphs
+# Add noise for optimal visualization purposes like VlnPlot() 
+noise <- rnorm(n = length(x = vln_df_F3.Ut.allCAR[[i]][, "Expression"])) / 100000
+vln_df_F3.Ut.allCAR[[i]]$Expression <- vln_df_F3.Ut.allCAR[[i]]$Expression  + noise
+
+ # Variable stats position
+y.position <- rep(max(vln_df_F3.Ut.allCAR[[i]]$Expression), 4)
+
+# Variable ylim range
+ylim <- ylim(0, max(y.position)+0.1)
+
+# violin plot with noise
+if(i != gene[length(gene)]){
+  if (any(i == gene[seq(1, length(gene),by=7)])){
+  plot_list_vln_F3.Ut.allCAR[[i]] <- vln_df_F3.Ut.allCAR[[i]] %>%
+ggplot(mapping=aes(x=Subset, y=Expression)) + geom_violin(mapping=aes(x=Subset, y=Expression, fill=Subset),scale = "width")+scale_fill_manual(values = alpha((mycolors),0.9))+ geom_boxplot(outlier.size = 0.01, width=0.3, size=0.5, alpha=0.4) + 
+    theme_bw()+
+    xlab("") +
+  ggtitle(label=i) +
+  stat_pvalue_manual(pwc[[i]],  hide.ns = F, y.position = y.position, label = "FDR.signif", size = p.val.size, tip.length = 0) +
+  labs(subtitle = get_test_label(vln_df_F3.Ut.allCAR[[i]] %>% kruskal_test(Expression ~ Subset) %>% mutate(KW_FDR = p.adjust (p, method='BH', n=length(gene))) %>% add_significance(p.col = "KW_FDR"), p.col = "KW_FDR.signif", detailed=F, description = "KW (FDR)"))+ylim +
+  theme(panel.grid = element_blank(),axis.title.y = element_text(size = 12), axis.text.y = element_text(size=12), axis.text.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5, size=plot.title.size, face = "bold"), plot.subtitle = element_text(size = 9))+ylab("Expression")+ theme(legend.position = "none")
+}
+}
+else{plot_list_vln_F3.Ut.allCAR[[i]] <- vln_df_F3.Ut.allCAR[[i]] %>%
+ggplot(mapping=aes(x=Subset, y=Expression)) + geom_violin(mapping=aes(x=Subset, y=Expression, fill=Subset),scale = "width")+scale_fill_manual(values = alpha((mycolors),0.9))+ geom_boxplot(outlier.size = 0.01, width=0.3, size=0.5, alpha=0.4) + 
+    theme_bw()+
+  xlab("") +
+  ggtitle(label=i) +
+  stat_pvalue_manual(pwc[[i]],  hide.ns = F, y.position =  y.position, label = "FDR.signif", size = p.val.size, tip.length = 0) +
+  labs(subtitle = get_test_label(vln_df_F3.Ut.allCAR[[i]] %>% kruskal_test(Expression ~ Subset) %>% mutate(KW_FDR = p.adjust (p, method='BH', n=length(gene))) %>% add_significance(p.col = "KW_FDR"), p.col = "KW_FDR.signif", detailed=F, description = "KW (FDR)"))+ylim +
+  theme(panel.grid = element_blank(),axis.title.y = element_text(size = 12), axis.text.y = element_text(size=12), axis.text.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5, size=plot.title.size, face = "bold"), plot.subtitle = element_text(size = 9)) +
+  theme(legend.title = element_text(size = 12), legend.text = element_text(size = 12), legend.key.size = unit(0.3, "cm"))+ylab("Expression")
+}
+}
+```
+
+
+```{r}
+# Set the factor "f" to adjust the size of the exported pdf, Boxplots: f=1.5 & w=12, Violin plots: f=  & w=
+f = 2.3
+w = 16
+h = f*if(length(gene)==any(seq(7,length(gene),by=7))){length(gene)} else{(length(gene)/7)+1}
+n = if(length(gene)==any(seq(7,length(gene),by=7))){length(gene)/7} else{(length(gene)/7)+1}
+
+ggsave("~/Violins Fig S5.pdf", plot=ggarrange(plotlist=plot_list_vln_F3.Ut.allCAR, ncol = 7, nrow=n, common.legend = T, legend = "right"), width = w, height = h, limitsize = F)
+```
+
+
+# Gene set enrichment analysis
+
+```{r}
+# enrichDatabase names
+listGeneSet(
+organism = "hsapiens",
+hostName = "http://www.webgestalt.org/",
+cache = NULL
+)
+
+```
+
+## Total CAR-+ object
+```{r}
+geneset <- CART.CD4CD8.markers
+genesetname <- "CART.CD4CD8.markers"
+write.table(subset(geneset, FDR < 0.05 & avg_log2FC < -0.2 | FDR < 0.05 & avg_log2FC > 0.2)[,c("gene", "avg_log2FC")], paste0("~/",genesetname, ".rnk"),quote=F,sep="\t",row.names=F, col.names = F)
+
+# WebGestalt enrichment analysis
+enrichResult_CART.CD4CD8.markers_KEGG <- WebGestaltR(enrichMethod="GSEA", organism="hsapiens",
+  enrichDatabase="pathway_KEGG", interestGeneFile=paste0("~/",genesetname,".rnk"), interestGeneType="genesymbol", sigMethod="top", topThr=10, minNum=5,
+outputDirectory="~/", projectName = paste0(genesetname,"_pathway_KEGG"))
+```
+
+### Fig. 2B
+```{r}
+ggplot(enrichResult_i3.3_KEGG, aes(x = reorder(description, normalizedEnrichmentScore), y = normalizedEnrichmentScore)) +
+  geom_bar(stat = "identity",
+           show.legend = FALSE,
+           fill = alpha(ifelse(enrichResult_i3.3_KEGG$normalizedEnrichmentScore < 0, "darkred", "darkblue"), 0.7),     
+           color = "white") + 
+  coord_flip(clip = "off") +
+  xlab("") + ylab("Normalized enrichment score") + ggtitle("KEGG pathway")+
+  theme_minimal() + theme(panel.grid.major.y  =  element_blank(), 
+                          axis.text.y = element_blank(), 
+                          axis.ticks.y = element_blank(),
+                          text = element_text(size = 14),
+                          plot.title = element_text(hjust = 0.5)) + 
+  geom_hline(yintercept = 0, color = 1, lwd = 0.2) + 
+  geom_text(aes(label = description, 
+                vjust = 0.5,
+                hjust= ifelse(normalizedEnrichmentScore < 0, 0, 1),
+                y= ifelse(normalizedEnrichmentScore < 0, 0.1, -0.1)), size=4) +
+  scale_y_continuous(limits = c(-3,3), breaks = c(-3,-1.5,0,1.5,3))
+```
+
+## Individual CD8 and CD4 CAR-+ comparisons
+```{r}
+#### CD8-LV CAR- vs CAR+
+geneset <- i2.1
+genesetname <- "i2.1"
+write.table(subset(geneset, FDR < 0.05 & avg_log2FC < -0.2 | FDR < 0.05 & avg_log2FC > 0.2)[,c("gene", "avg_log2FC")], paste0("~/",genesetname, ".rnk"),quote=F,sep="\t",row.names=F, col.names = F)
+
+# WebGestalt enrichment analysis
+enrichResult_i2.1_KEGG <- WebGestaltR(enrichMethod="GSEA", organism="hsapiens",
+  enrichDatabase="pathway_KEGG", interestGeneFile=paste0("~/",genesetname,".rnk"), interestGeneType="genesymbol", sigMethod="top", topThr=10, minNum=5,
+  outputDirectory="~/", projectName = paste0(genesetname,"_pathway_KEGG"))
+
+#### VSV-LV (CD8 cells) CAR- vs CAR+
+geneset <- i2.2
+genesetname <- "i2.2"
+write.table(subset(geneset, FDR < 0.05 & avg_log2FC < -0.2 | FDR < 0.05 & avg_log2FC > 0.2)[,c("gene", "avg_log2FC")], paste0("~/",genesetname, ".rnk"),quote=F,sep="\t",row.names=F, col.names = F)
+
+# WebGestalt enrichment analysis
+enrichResult_i2.2_KEGG <- WebGestaltR(enrichMethod="GSEA", organism="hsapiens",
+  enrichDatabase="pathway_KEGG", interestGeneFile=paste0("~/",genesetname,".rnk"), interestGeneType="genesymbol", sigMethod="top", topThr=10, minNum=5,
+  outputDirectory="~/", projectName = paste0(genesetname,"_pathway_KEGG"))
+
+#### CD4-LV CAR- vs CAR+
+geneset <- i3.1
+genesetname <- "i3.1"
+write.table(subset(geneset, FDR < 0.05 & avg_log2FC < -0.2 | FDR < 0.05 & avg_log2FC > 0.2)[,c("gene", "avg_log2FC")], paste0("~/",genesetname, ".rnk"),quote=F,sep="\t",row.names=F, col.names = F)
+
+# WebGestalt enrichment analysis
+enrichResult_i3.1_KEGG <- WebGestaltR(enrichMethod="GSEA", organism="hsapiens",
+  enrichDatabase="pathway_KEGG", interestGeneFile=paste0("~/",genesetname,".rnk"), interestGeneType="genesymbol", sigMethod="top", topThr=10, minNum=5,
+  outputDirectory="~/", projectName = paste0(genesetname,"_pathway_KEGG"))
+
+#### VSV-LV (CD4 cells) CAR- vs CAR+
+geneset <- i3.2
+genesetname <- "i3.2"
+write.table(subset(geneset, FDR < 0.05 & avg_log2FC < -0.2 | FDR < 0.05 & avg_log2FC > 0.2)[,c("gene", "avg_log2FC")], paste0("~/",genesetname, ".rnk"),quote=F,sep="\t",row.names=F, col.names = F)
+
+# WebGestalt enrichment analysis
+enrichResult_i3.2_KEGG <- WebGestaltR(enrichMethod="GSEA", organism="hsapiens",
+  enrichDatabase="pathway_KEGG", interestGeneFile=paste0("~/",genesetname,".rnk"), interestGeneType="genesymbol", sigMethod="top", topThr=10, minNum=5,
+  outputDirectory="~/", projectName = paste0(genesetname,"_pathway_KEGG"))
+```
+
+### Fig. S4
+```{r}
+#### CD8-LV CAR- vs CAR+
+ggplot(enrichResult_i2.1_KEGG, aes(x = reorder(description, normalizedEnrichmentScore), y = normalizedEnrichmentScore)) +
+  geom_bar(stat = "identity",
+           show.legend = FALSE,
+           fill = alpha(ifelse(enrichResult_i2.1_KEGG$normalizedEnrichmentScore < 0, "darkred", "darkblue"), 0.7),     
+           color = "white") + 
+  coord_flip(clip = "off") +
+  xlab("") + ylab("Normalized enrichment score") + ggtitle("KEGG pathway")+
+  theme_minimal() + theme(panel.grid.major.y  =  element_blank(), 
+                          axis.text.y = element_blank(), 
+                          axis.ticks.y = element_blank(),
+                          text = element_text(size = 14),
+                          plot.title = element_text(hjust = 0.5)) + 
+  geom_hline(yintercept = 0, color = 1, lwd = 0.2) + 
+  geom_text(aes(label = description, 
+                vjust = 0.5,
+                hjust= ifelse(normalizedEnrichmentScore < 0, 0, 1),
+                y= ifelse(normalizedEnrichmentScore < 0, 0.1, -0.1)), size=4) +
+  scale_y_continuous(limits = c(-3,3), breaks = c(-3,-1.5,0,1.5,3))
+
+#### VSV-LV (CD8 cells) CAR- vs CAR+
+ggplot(enrichResult_i2.2_KEGG, aes(x = reorder(description, normalizedEnrichmentScore), y = normalizedEnrichmentScore)) +
+  geom_bar(stat = "identity",
+           show.legend = FALSE,
+           fill = alpha(ifelse(enrichResult_i2.2_KEGG$normalizedEnrichmentScore < 0, "darkred", "darkblue"), 0.7),     
+           color = "white") + 
+  coord_flip(clip = "off") +
+  xlab("") + ylab("Normalized enrichment score") + ggtitle("KEGG pathway")+
+  theme_minimal() + theme(panel.grid.major.y  =  element_blank(), 
+                          axis.text.y = element_blank(), 
+                          axis.ticks.y = element_blank(),
+                          text = element_text(size = 14),
+                          plot.title = element_text(hjust = 0.5)) + 
+  geom_hline(yintercept = 0, color = 1, lwd = 0.2) + 
+  geom_text(aes(label = description, 
+                vjust = 0.5,
+                hjust= ifelse(normalizedEnrichmentScore < 0, 0, 1),
+                y= ifelse(normalizedEnrichmentScore < 0, 0.1, -0.1)), size=4) +
+  scale_y_continuous(limits = c(-3,3), breaks = c(-3,-1.5,0,1.5,3))
+
+#### CD4-LV CAR- vs CAR+
+ggplot(enrichResult_i3.1_KEGG, aes(x = reorder(description, normalizedEnrichmentScore), y = normalizedEnrichmentScore)) +
+  geom_bar(stat = "identity",
+           show.legend = FALSE,
+           fill = alpha(ifelse(enrichResult_i3.1_KEGG$normalizedEnrichmentScore < 0, "darkred", "darkblue"), 0.7),     
+           color = "white") + 
+  coord_flip(clip = "off") +
+  xlab("") + ylab("Normalized enrichment score") + ggtitle("KEGG pathway")+
+  theme_minimal() + theme(panel.grid.major.y  =  element_blank(), 
+                          axis.text.y = element_blank(), 
+                          axis.ticks.y = element_blank(),
+                          text = element_text(size = 14),
+                          plot.title = element_text(hjust = 0.5)) + 
+  geom_hline(yintercept = 0, color = 1, lwd = 0.2) + 
+  geom_text(aes(label = description, 
+                vjust = 0.5,
+                hjust= ifelse(normalizedEnrichmentScore < 0, 0, 1),
+                y= ifelse(normalizedEnrichmentScore < 0, 0.1, -0.1)), size=4) +
+  scale_y_continuous(limits = c(-3,3), breaks = c(-3,-1.5,0,1.5,3))
+
+#### VSV-LV (CD4 cells) CAR- vs CAR+
+ggplot(enrichResult_i3.2_KEGG, aes(x = reorder(description, normalizedEnrichmentScore), y = normalizedEnrichmentScore)) +
+  geom_bar(stat = "identity",
+           show.legend = FALSE,
+           fill = alpha(ifelse(enrichResult_i3.2_KEGG$normalizedEnrichmentScore < 0, "darkred", "darkblue"), 0.7),     
+           color = "white") + 
+  coord_flip(clip = "off") +
+  xlab("") + ylab("Normalized enrichment score") + ggtitle("KEGG pathway")+
+  theme_minimal() + theme(panel.grid.major.y  =  element_blank(), 
+                          axis.text.y = element_blank(), 
+                          axis.ticks.y = element_blank(),
+                          text = element_text(size = 14),
+                          plot.title = element_text(hjust = 0.5)) + 
+  geom_hline(yintercept = 0, color = 1, lwd = 0.2) + 
+  geom_text(aes(label = description, 
+                vjust = 0.5,
+                hjust= ifelse(normalizedEnrichmentScore < 0, 0, 1),
+                y= ifelse(normalizedEnrichmentScore < 0, 0.1, -0.1)), size=4) +
+  scale_y_continuous(limits = c(-3,3), breaks = c(-3,-1.5,0,1.5,3))
+```
+
+# Venn diagrams
+## Fig. S3A
+```{r}
+# Common DE genes of all CAR- vs CAR+ comparisons
+Reduce(intersect, list(subset(i2.1, FDR <=0.05 & avg_log2FC <= -0.2 | FDR <= 0.05 & avg_log2FC > 0.2)$gene, 
+  subset(i2.2, FDR <=0.05 & avg_log2FC < -0.2 | FDR <=0.05 & avg_log2FC > 0.2)$gene,
+  subset(i3.1, FDR <=0.05 & avg_log2FC < -0.2 | FDR <=0.05 & avg_log2FC > 0.2)$gene,
+  subset(i3.2, FDR <=0.05 & avg_log2FC < -0.2 | FDR <=0.05 & avg_log2FC > 0.2)$gene,
+  subset(CART.CD4CD8.markers, FDR <=0.05 & avg_log2FC < -0.2 | FDR <=0.05 & avg_log2FC > 0.2)$gene))
+
+# All CAR+ vs CAR- (CD8-LV, CD4-LV, VSV-LV, VSV-LV, total CAR)
+ggVennDiagram::ggVennDiagram(list(
+  subset(i2.1, FDR <=0.05 & avg_log2FC < -0.2 | FDR <= 0.05 & avg_log2FC > 0.2)$gene, 
+  subset(i2.2, FDR <=0.05 & avg_log2FC < -0.2 | FDR <=0.05 & avg_log2FC > 0.2)$gene,
+  subset(i3.1, FDR <=0.05 & avg_log2FC < -0.2 | FDR <=0.05 & avg_log2FC > 0.2)$gene,
+  subset(i3.2, FDR <=0.05 & avg_log2FC < -0.2 | FDR <=0.05 & avg_log2FC > 0.2)$gene,
+  subset(CART.CD4CD8.markers, FDR <=0.05 & avg_log2FC < -0.2 | FDR <=0.05 & avg_log2FC > 0.2)$gene),
+  label_alpha = 0.7, label = "count", set_size = 2, label_size = 10, category.names = c("CD8-LV", "VSV-LV", "CD4-LV", "VSV-LV ", "CAR"))+theme(legend.position = "none")
+```
+## Compare LV-inoculated samples with Untransduced cells
+```{r}
+Idents(F3.CD8) <- "CD8CAR"
+Idents(F3.CD4) <- "CD4CAR"
+
+# Ut vs CD8-LV
+Ut1 <- FindMarkers(F3.CD8, logfc.threshold = 0.2, only.pos = F,ident.2 = "1. Untransduced", ident.1 = c("2. CD8-LV CAR-", "4. CD8-LV CAR+"), test.use = "wilcox")
+Ut1$gene <- row.names(Ut1)
+Ut1$FDR <- p.adjust(Ut1$p_val, method = "BH")
+
+Ut2 <- FindMarkers(F3.CD8, logfc.threshold = 0.2, only.pos = F,ident.2 = "1. Untransduced", ident.1 = c("3. VSV-LV CAR-", "5. VSV-LV CAR+"), test.use = "wilcox")
+Ut2$gene <- row.names(Ut2)
+Ut2$FDR <- p.adjust(Ut2$p_val, method = "BH")
+
+Ut3 <- FindMarkers(F3.CD4, logfc.threshold = 0.2, only.pos = F,ident.2 = "1. Untransduced", ident.1 = c("2. CD4-LV CAR-", "4. CD4-LV CAR+"), test.use = "wilcox")
+Ut3$gene <- row.names(Ut3)
+Ut3$FDR <- p.adjust(Ut3$p_val, method = "BH")
+
+Ut4 <- FindMarkers(F3.CD4, logfc.threshold = 0.2, only.pos = F,ident.2 = "1. Untransduced", ident.1 = c("3. VSV-LV CAR-", "5. VSV-LV CAR+"), test.use = "wilcox")
+Ut4$gene <- row.names(Ut4)
+Ut4$FDR <- p.adjust(Ut4$p_val, method = "BH")
+
+Ut5 <- FindMarkers(F3.filtered.cc, logfc.threshold = 0.2, only.pos = F,ident.2 = "1. Untransduced", ident.1 = "4. VSV-LV", test.use = "wilcox")
+Ut5$gene <- row.names(Ut5)
+Ut5$FDR <- p.adjust(Ut5$p_val, method = "BH")
+```
+
+### Fig. S2A
+```{r}
+
+```
+

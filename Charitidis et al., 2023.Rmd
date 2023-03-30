@@ -5,6 +5,17 @@ date: "2023-03-19"
 output: html_document
 ---
 
+###########
+♦ For filtering and QC the reads follow this tutorial: https://bioconductor.org/packages/devel/bioc/vignettes/scuttle/inst/doc/qc.html
+
+♦ Downstream analysis and batch effect correctio via donor integration was performed with Seurat (Satija lab): https://satijalab.org/seurat/articles/integration_introduction.html
+Citation: Hao Y, Hao S, Andersen-Nissen E, Mauck WM 3rd, Zheng S, Butler A, Lee MJ, Wilk AJ, Darby C, Zager M, Hoffman P, Stoeckius M, Papalexi E, Mimitou EP, Jain J, Srivastava A, Stuart T, Fleming LM, Yeung B, Rogers AJ, McElrath JM, Blish CA, Gottardo R, Smibert P, Satija R. Integrated analysis of multimodal single-cell data. Cell. 2021 Jun 24;184(13):3573-3587.e29. doi: 10.1016/j.cell.2021.04.048. Epub 2021 May 31. PMID: 34062119; PMCID: PMC8238499.
+
+♦ Normalization of reads was conducted with deconvolution strategy via scran http://bioconductor.org/packages/release/bioc/vignettes/scran/inst/doc/scran.html
+Citation: L. Lun, A.T., Bach, K. & Marioni, J.C. Pooling across cells to normalize single-cell RNA sequencing data with many zero counts. Genome Biol 17, 75 (2016). https://doi.org/10.1186/s13059-016-0947-7
+###########
+
+
 ```{r}
 options(java.parameters = c("-XX:+UseConcMarkSweepGC", "-Xmx8192m"))
 options(digits=3)
@@ -15,6 +26,7 @@ library(ggplot2)
 library(tidyr)
 library(multtest)
 library(dplyr)
+library(base)
 library(Seurat)
 library(SeuratData)
 library(sctransform)
@@ -36,6 +48,8 @@ library(ChIPpeakAnno)
 library("org.Hs.eg.db")
 library(WebGestaltR)
 library(EnsDb.Hsapiens.v86)
+library(data.table)
+library(gtools)
 
 # Define increased memory size
 #memory.limit(80000)
@@ -68,28 +82,28 @@ return(geneset)
 ## Import the UMI-gene matrices from Seven Bridges
 In case Seurat objects (.rds files) are not available, load the RSEC_MolsPerCell.csv files.
 ```{r, error=TRUE}
-Untransduced_1 <- read.csv("~/Untransduced_Donor1_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
-Untransduced_2 <- read.csv("~/Untransduced_Donor2_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
-Untransduced_3 <- read.csv("~/Untransduced_Donor3_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
+Control_1 <- read.csv("~/Control_Donor1_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
+Control_2 <- read.csv("~/Control_Donor2_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
+Control_3 <- read.csv("~/Control_Donor3_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
 
 VSVG_LV_1 <- read.csv("~/VSV_LV_Donor1_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
 VSVG_LV_2 <- read.csv("~/VSV_LV_Donor2_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
 VSVG_LV_3 <- read.csv("~/VSV_LV_Donor3_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
 
 CD8_LV_1 <- read.csv("~/CD8_LV_Donor1_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
-CD8_LV_2 <- read.csv("~/CD8_LV_Donor1_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
-CD8_LV_3 <- read.csv("~/CD8_LV_Donor1_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
+CD8_LV_2 <- read.csv("~/CD8_LV_Donor2_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
+CD8_LV_3 <- read.csv("~/CD8_LV_Donor3_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
 
 CD4_LV_1 <- read.csv("~/CD4_LV_Donor1_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
-CD4_LV_2 <- read.csv("~/CD4_LV_Donor1_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
-CD4_LV_3 <- read.csv("~/CD4_LV_Donor1_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
+CD4_LV_2 <- read.csv("~/CD4_LV_Donor2_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
+CD4_LV_3 <- read.csv("~/CD4_LV_Donor3_RSEC_MolsPerCell.csv", skip = 0, sep=",", header = TRUE, row.names = 1, check.names = FALSE)
 ```
 
 Create Seurat objects
 ```{r}
-Ut_1 <- CreateSeuratObject(counts = t(Untransduced_1), project = "1. Untransduced_D1")
-Ut_2 <- CreateSeuratObject(counts = t(Untransduced_2), project = "1. Untransduced_D2")
-Ut_3 <- CreateSeuratObject(counts = t(Untransduced_3), project = "1. Untransduced_D3")
+Ctrl_1 <- CreateSeuratObject(counts = t(Control_1), project = "1. Control_D1")
+Ctrl_2 <- CreateSeuratObject(counts = t(Control_2), project = "1. Control_D2")
+Ctrl_3 <- CreateSeuratObject(counts = t(Control_3), project = "1. Control_D3")
 
 CD8_1 <- CreateSeuratObject(counts = t(CD8_LV_1), project = "2. CD8-LV_D1")
 CD8_2 <- CreateSeuratObject(counts = t(CD8_LV_2), project = "2. CD8-LV_D2")
@@ -106,16 +120,16 @@ VSVG_3 <- CreateSeuratObject(counts = t(VSVG_LV_3), project = "4. VSV-LV_D3")
 
 Merge Seurat objects
 ```{r}
-F3.Ut <- merge(Ut_1, c(Ut_2, Ut_3))
+F3.Ctrl <- merge(Ctrl_1, c(Ctrl_2, Ctrl_3))
 F3.CD8 <- merge(CD8_1, c(CD8_2, CD8_3))
 F3.CD4 <- merge(CD4_1, c(CD4_2, CD4_3))
 F3.VSV <- merge(VSVG_1, c(VSVG_2, VSVG_3))
-F3.All <- merge(F3.Ut, c(F3.CD8, F3.CD4, F3.VSV))
+F3.All <- merge(F3.Ctrl, c(F3.CD8, F3.CD4, F3.VSV))
 ```
 
 Remove unecessary files
 ```{r}
-remove(Ut_1, Ut_2, Ut_3, CD8_1, CD8_2, CD8_3, CD4_1, CD4_2, CD4_3, VSVG_1, VSVG_2, VSVG_3, F3.Ut, F3.VSV)
+remove(Ctrl_1, Ctrl_2, Ctrl_3, CD8_1, CD8_2, CD8_3, CD4_1, CD4_2, CD4_3, VSVG_1, VSVG_2, VSVG_3, F3.Ctrl, F3.VSV)
 ```
 
 
@@ -153,7 +167,7 @@ levels(F3.All) # New order is presented correctly in UMAP
 # To samples
 Idents(F3.All) <- "All.Idents"
 F3.All[["Numbered.samples"]] <- Idents(F3.All)
-Numbered.samples <- c("1. Untransduced", "1. Untransduced", "1. Untransduced", "2. CD8-LV","2. CD8-LV","2. CD8-LV", "3. CD4-LV","3. CD4-LV","3. CD4-LV", "4. VSV-LV","4. VSV-LV","4. VSV-LV")
+Numbered.samples <- c("1. Control", "1. Control", "1. Control", "2. CD8-LV","2. CD8-LV","2. CD8-LV", "3. CD4-LV","3. CD4-LV","3. CD4-LV", "4. VSV-LV","4. VSV-LV","4. VSV-LV")
 names(Numbered.samples) <- levels(F3.All)
 Idents(F3.All) <- "Numbered.samples"
 F3.All <- RenameIdents(F3.All, Numbered.samples)
@@ -164,6 +178,15 @@ levels(F3.All)
 Idents(F3.All) <- "orig.ident"
 F3.All$Origin_ID <- Idents(F3.All)
 levels(F3.All)
+
+
+Idents(F3.CD8) <- "CD8CAR"
+CD8CAR <- c("1. Control", "2. CD8-LV CAR-", "3. VSV-LV CAR-", "4. CD8-LV CAR+", "5. VSV-LV CAR+")
+names(CD8CAR) <- levels(F3.CD8)
+Idents(F3.CD8) <- "CD8CAR"
+F3.CD8 <- RenameIdents(F3.CD8, CD8CAR)
+F3.CD8$CD8CAR <- Idents(F3.CD8)
+levels(F3.CD8)
 ```
 
 
@@ -247,8 +270,6 @@ F3.filtered@assays$RNA@data = log1p(x = assay(sce, "normcounts")) # ln(counts+1)
 # Pass again the percent.mito & Largest gene expression to seurat object
 F3.filtered[["percent.mt"]] <- PercentageFeatureSet(F3.filtered, features = is.mito)
 F3.filtered[["percent.ribo"]] <- PercentageFeatureSet(F3.filtered, features = ribo.genes.freq.names)
-F3.filtered$Percent.Largest.Gene <- apply(F3.filtered@assays$RNA@counts ,2, function(x)(100*max(x))/sum(x))
-F3.All$Percent.Largest.Gene <- apply(F3.All@assays$RNA@counts ,2, function(x)(100*max(x))/sum(x))
 ```
 
 
@@ -433,7 +454,7 @@ DefaultAssay(F3.filtered.cc) <- "RNA"
 Idents(F3.filtered.cc) <- "Numbered.samples"
 
 # CD8A
-data_df_CD8A <- data.frame(Expression=subset(F3.filtered.cc, idents=c("1. Untransduced","2. CD8-LV", "4. VSV-LV"))[["RNA"]]@data["CD8A",]) 
+data_df_CD8A <- data.frame(Expression=subset(F3.filtered.cc, idents=c("1. Control","2. CD8-LV", "4. VSV-LV"))[["RNA"]]@data["CD8A",]) 
 
 data_df_CD8A %>%
 ggplot(mapping=aes(x=Expression)) +geom_density()
@@ -496,7 +517,7 @@ FeatureScatter(F3.filtered.cc, feature1="BASP1", feature2 = "nFeature_RNA", grou
 ```{r}
 Idents(F3.filtered.cc) <- "Numbered.samples"
 # Subset CD8 cells
-CD8cells <- subset(F3.filtered.cc, idents=c("1. Untransduced", "2. CD8-LV", "4. VSV-LV"), CD8A > log1p(0.4891155))
+CD8cells <- subset(F3.filtered.cc, idents=c("1. Control", "2. CD8-LV", "4. VSV-LV"), CD8A > log1p(0.4891155))
 # CAR positive
 CD8CARpos <- subset(CD8cells, idents=c("2. CD8-LV", "4. VSV-LV"),CAR > log1p(2.979981))
 
@@ -509,10 +530,10 @@ CD8CARpos$CD8CAR <- Idents(CD8CARpos)
 levels(CD8CARpos)
 
 # CAR negative
-CD8CARneg <- subset(CD8cells, idents=c("1. Untransduced","2. CD8-LV", "4. VSV-LV"),CAR <= log1p(2.979981))
+CD8CARneg <- subset(CD8cells, idents=c("1. Control","2. CD8-LV", "4. VSV-LV"),CAR <= log1p(2.979981))
 
 CD8CARneg[["CD8CAR"]] <- Idents(CD8CARneg)
-CD8CAR <- c("1. Untransduced", "2. CD8-LV CAR-", "3. VSV-LV CAR-")
+CD8CAR <- c("1. Control", "2. CD8-LV CAR-", "3. VSV-LV CAR-")
 names(CD8CAR) <- levels(CD8CARneg)
 Idents(CD8CARneg) <- "CD8CAR"
 CD8CARneg <- RenameIdents(CD8CARneg, CD8CAR)
@@ -538,7 +559,7 @@ Idents(F3.CD8) <- "CD8CAR"
 ```{r}
 Idents(F3.filtered.cc) <- "Numbered.samples"
 # Subset CD8 cells
-CD4cells <- subset(F3.filtered.cc, idents=c("1. Untransduced", "3. CD4-LV", "4. VSV-LV"), CD8A <= log1p(0.4891155))
+CD4cells <- subset(F3.filtered.cc, idents=c("1. Control", "3. CD4-LV", "4. VSV-LV"), CD8A <= log1p(0.4891155))
 # CAR positive
 CD4CARpos <- subset(CD4cells, idents=c("3. CD4-LV", "4. VSV-LV"), CAR > log1p(2.979981))
 
@@ -551,10 +572,10 @@ CD4CARpos$CD4CAR <- Idents(CD4CARpos)
 levels(CD4CARpos)
 
 # CAR negative
-CD4CARneg <- subset(CD4cells, idents=c("1. Untransduced","3. CD4-LV", "4. VSV-LV"),CAR <= log1p(2.979981))
+CD4CARneg <- subset(CD4cells, idents=c("1. Control","3. CD4-LV", "4. VSV-LV"),CAR <= log1p(2.979981))
 
 CD4CARneg[["CD4CAR"]] <- Idents(CD4CARneg)
-CD4CAR <- c("1. Untransduced", "2. CD4-LV CAR-", "3. VSV-LV CAR-")
+CD4CAR <- c("1. Control", "2. CD4-LV CAR-", "3. VSV-LV CAR-")
 names(CD4CAR) <- levels(CD4CARneg)
 Idents(CD4CARneg) <- "CD4CAR"
 CD4CARneg <- RenameIdents(CD4CARneg, CD4CAR)
@@ -578,7 +599,7 @@ Idents(F3.CD4) <- "CD4CAR"
 
 Remove unwanted objects
 ```{r, error=TRUE}
-remove(Ut_1,Ut_2, Ut_3,CD8_1,CD8_2, CD8_3,CD4_1, CD4_2, CD4_3,VSVG_1,VSVG_2,VSVG_3,CD8CARneg,CD8CARpos, CD4CARneg,CD4CARpos, Donors_2_3, F3.Ut, F3.VSV, TagsDonors_2_3,Untransduced_1, Untransduced_2, Untransduced_3, Untransduced_2_cells, Untransduced_3_cells, CD4_LV_1, CD4_LV_2, CD4_LV_3, CD4_LV_2_cells, CD4_LV_3_cells, CD8_LV_1, CD8_LV_2, CD8_LV_3,CD8_LV_2_cells, CD8_LV_3_cells, VSVG_LV_1, VSVG_LV_2,VSVG_LV_3, VSVG_LV_2_cells, VSVG_LV_3_cells, CD4cells, CD8cells)
+remove(Ctrl_1,Ctrl_2, Ctrl_3,CD8_1,CD8_2, CD8_3,CD4_1, CD4_2, CD4_3,VSVG_1,VSVG_2,VSVG_3,CD8CARneg,CD8CARpos, CD4CARneg,CD4CARpos, Donors_2_3, F3.Ctrl, F3.VSV, TagsDonors_2_3,Control_1, Control_2, Control_3, Control_2_cells, Control_3_cells, CD4_LV_1, CD4_LV_2, CD4_LV_3, CD4_LV_2_cells, CD4_LV_3_cells, CD8_LV_1, CD8_LV_2, CD8_LV_3,CD8_LV_2_cells, CD8_LV_3_cells, VSVG_LV_1, VSVG_LV_2,VSVG_LV_3, VSVG_LV_2_cells, VSVG_LV_3_cells, CD4cells, CD8cells)
 ```
 
 
@@ -700,8 +721,6 @@ VlnPlot(F3.CD4, pt.size = 0.1, features = "CAR")+NoLegend()
 
 ### Fig. 1B
 ```{r}
-colorblind_vector <- c("plum3", "yellow","blue","red", "black")
-
 # Export 6x6
 ## F3.filtered.cc
 DimPlot(F3.filtered.cc, reduction ="umap", group.by="Numbered.samples", cols = "Paired", pt.size = 0.5, shuffle = T) + labs(title = "")+theme(aspect.ratio = 1)
@@ -711,19 +730,30 @@ DimPlot(F3.CD8, reduction ="umap", group.by="CD8CAR", cols = "Paired", pt.size =
 DimPlot(F3.CD4, reduction ="umap", group.by="CD4CAR", cols = "Paired", pt.size = 1, shuffle = T) + labs(title = "")+theme(aspect.ratio = 1)
 ```
 
-## F3.Ut.allCAR object
+### Fig. S2
+```{r}
+# Export 4.5x12
+## F3.filtered.cc
+DimPlot(F3.filtered.cc, reduction ="umap", group.by="Numbered.samples", cols = "Paired", pt.size = 0.5, shuffle = T, split.by = "Numbered.samples") + labs(title = "")+theme(aspect.ratio = 1)
+## CD8
+DimPlot(F3.CD8, reduction ="umap", group.by="CD8CAR", cols = "Paired", pt.size = 0.5, shuffle = T, split.by = "CD8CAR") + labs(title = "")+theme(aspect.ratio = 1)
+## CD4
+DimPlot(F3.CD4, reduction ="umap", group.by="CD4CAR", cols = "Paired", pt.size = 0.5, shuffle = T, split.by = "CD4CAR") + labs(title = "")+theme(aspect.ratio = 1)
+```
+
+## F3.Ctrl.allCAR object
 ```{r}
 Idents(F3.filtered.cc) <- "Numbered.samples"
 
 # Subset CD8/CD4 cells
-Ut <- subset(F3.filtered.cc, idents="1. Untransduced")
+Ctrl <- subset(F3.filtered.cc, idents="1. Control")
 CD8LV <- subset(F3.filtered.cc, idents=c("2. CD8-LV"), CD8A > log1p(0.4891155))
 CD4LV <- subset(F3.filtered.cc, idents=c("3. CD4-LV"), CD8A <= log1p(0.4891155))
 VSVLV <- subset(F3.filtered.cc, idents=c("4. VSV-LV"))
 
 # Renaming idents/metadata CAR log1p(2.979981), CD8A log1p(0.4891155)
-cells <- WhichCells(Ut, expression=`CD8A` > log1p(0.4891155))
-Ut@meta.data$CAR <- ifelse(rownames(Ut@meta.data) %in% cells, "1. Ctrl CD8", "2. Ctrl CD4")
+cells <- WhichCells(Ctrl, expression=`CD8A` > log1p(0.4891155))
+Ctrl@meta.data$CAR <- ifelse(rownames(Ctrl@meta.data) %in% cells, "1. Ctrl CD8", "2. Ctrl CD4")
 
 cells <- WhichCells(CD8LV, expression=`CAR` <= log1p(2.979981))
 CD8LV@meta.data$CAR <- ifelse(rownames(CD8LV@meta.data) %in% cells, "3. CD8-LV CAR-", "4. CD8-LV CAR+")
@@ -734,17 +764,33 @@ CD4LV@meta.data$CAR <- ifelse(rownames(CD4LV@meta.data) %in% cells, "5. CD4-LV C
 cells <- WhichCells(VSVLV, expression=`CAR` <= log1p(2.979981))
 VSVLV@meta.data$CAR <- ifelse(rownames(VSVLV@meta.data) %in% cells, "7. VSV-LV CAR-", "8. VSV-LV CAR+")
 
-F3.Ut.allCAR <- merge(Ut, c(CD8LV, CD4LV, VSVLV))
-levels(F3.Ut.allCAR)
+F3.Ctrl.allCAR <- merge(Ctrl, c(CD8LV, CD4LV, VSVLV))
+levels(F3.Ctrl.allCAR)
 
-remove(Ut, CD8LV, CD4LV, VSVLV)
+remove(Ctrl, CD8LV, CD4LV, VSVLV)
 
 # Exclude any possible B cells
-F3.Ut.allCAR <- subset(F3.Ut.allCAR, CD22 < log1p(0.1) & CD19 < log1p(0.1) & MS4A1 < log1p(0.1) & BASP1 < log1p(0.1))
+F3.Ctrl.allCAR <- subset(F3.Ctrl.allCAR, CD22 < log1p(0.1) & CD19 < log1p(0.1) & MS4A1 < log1p(0.1) & BASP1 < log1p(0.1))
 
 # Number of cells per condition
-table(F3.Ut.allCAR$CAR)
-table(Idents(F3.Ut.allCAR), F3.Ut.allCAR$Donors)
+table(F3.Ctrl.allCAR$CAR)
+table(F3.Ctrl.allCAR$CAR, F3.Ctrl.allCAR$Donors)
+
+# DEGs between CD8 and CD4 Ctrl cells
+Idents(F3.Ctrl.allCAR) <- "CAR"
+DEG.CD8.CD4.Ctrl <- FindMarkers(F3.Ctrl.allCAR, logfc.threshold = 0, ident.2 = "1. Ctrl CD8", ident.1 = "2. Ctrl CD4")
+DEG.CD8.CD4.Ctrl$gene <- rownames(DEG.CD8.CD4.Ctrl)
+# Replace Bonferroni adjusted p-value with FDR
+DEG.CD8.CD4.Ctrl$p_val_adj <- NULL
+DEG.CD8.CD4.Ctrl$FDR <- p.adjust(DEG.CD8.CD4.Ctrl$p_val, method = "BH")
+
+# DEGs between CAR- CAR+ of total VSV-LV
+Idents(F3.Ctrl.allCAR) <- "CAR"
+DEG.CD8.CD4.VSV <- FindMarkers(F3.Ctrl.allCAR, logfc.threshold = 0, ident.2 = "7. VSV-LV CAR-", ident.1 = "8. VSV-LV CAR+")
+DEG.CD8.CD4.VSV$gene <- rownames(DEG.CD8.CD4.VSV)
+# Replace Bonferroni adjusted p-value with FDR
+DEG.CD8.CD4.VSV$p_val_adj <- NULL
+DEG.CD8.CD4.VSV$FDR <- p.adjust(DEG.CD8.CD4.VSV$p_val, method = "BH")
 ```
 
 ## Total CAR+- object
@@ -770,7 +816,7 @@ xlsx::write.xlsx(CART.CD4CD8.markers, file = "~/CART.CD4CD8.markers.xlsx", sheet
 gc()
 ```
 
-### Fig. S3B
+### Fig. S4B
 ```{r, fig.height=5, fig.width=5}
 # Total CAR+ vs CAR-
 EnhancedVolcano(CART.CD4CD8.markers, lab=rownames(CART.CD4CD8.markers), x ="avg_log2FC", y ="FDR", FCcutoff = 0.2,legendPosition = "bottom", subtitle = NULL, cutoffLineType="blank", legendLabels=c("n.s.", "|log2FC|>0.2", "FDR \u2264 0.05", "FDR \u2264 0.05 & |log2FC|>0.2"), pCutoff = 0.05,ylab = bquote(~-Log[10] ~ italic(FDR)))+xlim(-1,1)+theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5))+labs(title = "CAR+ vs. CAR-")
@@ -869,22 +915,28 @@ i3.3 <- full.gene.names(i3.3)
 
 # Export
 gc()
-xlsx::write.xlsx(i2.1, file = "~/F3.CD4.markers.xlsx", sheetName = "CD4-LV CAR- vs CAR+ (no log2FC threshold)", append = T)
-xlsx::write.xlsx(i2.2, file = "~/F3.CD4.markers.xlsx", sheetName = "VSV-LV CAR- vs CAR+ (no log2FC threshold)", append = T)
+xlsx::write.xlsx(i3.1, file = "~/F3.CD4.markers.xlsx", sheetName = "CD4-LV CAR- vs CAR+ (no log2FC threshold)", append = T)
+xlsx::write.xlsx(i3.2, file = "~/F3.CD4.markers.xlsx", sheetName = "VSV-LV CAR- vs CAR+ (no log2FC threshold)", append = T)
 gc()
-xlsx::write.xlsx(i2.3, file = "~/F3.CD4.markers.xlsx", sheetName = "CD4-LV and VSV-LV CAR- vs CAR+ (no log2FC threshold)", append = T)
+xlsx::write.xlsx(i3.3, file = "~/F3.CD4.markers.xlsx", sheetName = "CD4-LV and VSV-LV CAR- vs CAR+ (no log2FC threshold)", append = T)
 gc()
 ```
 
 ### Fig. 2A
 ```{r}
-# Save landscape A4
+# Save landscape 9x12
 ggarrange(EnhancedVolcano(i2.1, rownames(i2.1), x ="avg_log2FC", y ="FDR", FCcutoff = 0.2,legendPosition = "bottom", subtitle = NULL, cutoffLineType="blank", labFace = "italic", labSize = 4,legendLabels=c("ns", "|log2FC|>0.2", "FDR<0.05", "FDR<0.05 & |log2FC|>0.2"), pCutoff = 0.05,ylab = bquote(~-Log[10] ~ italic(FDR)))+xlim(-1,1)+theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5))+labs(title = "CD8-LV: CAR+ vs CAR-")+theme(aspect.ratio = 0.5),
           EnhancedVolcano(i3.1, rownames(i3.1), x ="avg_log2FC", y ="FDR", FCcutoff = 0.2,legendPosition = "bottom", subtitle = NULL, cutoffLineType="blank", labFace = "italic", labSize = 4,legendLabels=c("ns", "|log2FC|>0.2", "FDR<0.05", "FDR<0.05 & |log2FC|>0.2"), pCutoff = 0.05,ylab = bquote(~-Log[10] ~ italic(FDR)))+xlim(-1,1)+theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5))+labs(title = "CD4-LV: CAR+ vs CAR-")+theme(aspect.ratio = 0.5),
           EnhancedVolcano(i2.2, rownames(i2.2), x ="avg_log2FC", y ="FDR", FCcutoff = 0.2,legendPosition = "bottom", subtitle = NULL, cutoffLineType="blank", labFace = "italic", labSize = 4,legendLabels=c("ns", "|log2FC|>0.2", "FDR<0.05", "FDR<0.05 & |log2FC|>0.2"), pCutoff = 0.05,ylab = bquote(~-Log[10] ~ italic(FDR)))+xlim(-1,1)+ylim(NA,50)+theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5))+labs(title = "VSV-LV (CD8): CAR+ vs CAR-")+theme(aspect.ratio = 0.5),
           EnhancedVolcano(i3.2, rownames(i3.2), x ="avg_log2FC", y ="FDR", FCcutoff = 0.2,legendPosition = "bottom", subtitle = NULL, cutoffLineType="blank", labFace = "italic", labSize = 4, legendLabels=c("ns", "|log2FC|>0.2", "FDR<0.05", "FDR<0.05 & |log2FC|>0.2"), pCutoff = 0.05,ylab = bquote(~-Log[10] ~ italic(FDR)))+xlim(-1,1)+theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5))+labs(title = "VSV-LV (CD4): CAR+ vs CAR-")+theme(aspect.ratio = 0.5),
           common.legend = T, legend = "bottom", ncol = 2, nrow = 2)
 ```
+### Fig. S4B
+```{r}
+# Total CAR+ vs CAR- (7x8.5)
+EnhancedVolcano(CART.CD4CD8.markers, rownames(CART.CD4CD8.markers), x ="avg_log2FC", y ="FDR", FCcutoff = 0.2,legendPosition = "bottom", labFace = "italic", labSize = 4, subtitle = NULL, cutoffLineType="blank", legendLabels=c("ns", "|log2FC|>0.2", "FDR<0.05", "FDR<0.05 & |log2FC|>0.2"), pCutoff = 0.05,ylab = bquote(~-Log[10] ~ italic(FDR)))+xlim(-1,1)+theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5))+labs(title = "CAR- vs. CAR+")+theme(aspect.ratio = 0.5)
+```
+
 
 # Violin plots
 
@@ -952,17 +1004,7 @@ y.position <- max(vln_df_CAR[[i]]$Expression)+0.5
 ylim <- ylim(0, max(y.position)+0.1)
 
 # violin plot with noise
-if(i != gene[length(gene)]){
-  plot_list_vln_CAR[[i]] <- vln_df_CAR[[i]] %>%
-ggplot(mapping=aes(x=Subset, y=Expression)) + geom_violin(mapping=aes(x=Subset, y=Expression, fill=Subset),scale = "width")+scale_fill_manual(values = alpha((mycolors),0.7))+ geom_boxplot(outlier.size = 0.01, width=0.3, size=0.5, alpha=0.4) + 
-    theme_bw()+
-  xlab("") +
-  ggtitle(label=i) +
-  stat_pvalue_manual(pwc[[i]],  hide.ns = F, y.position =  y.position, label = "FDR.signif", size = p.val.size, tip.length = 0)+ylim +
-  theme(aspect.ratio = 1, panel.grid = element_blank(),axis.title.y = element_text(size = 13), axis.text.y = element_text(size=13), axis.text.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5, size=plot.title.size, face = "bold"), plot.subtitle = element_text(size = 13))+ylab("Expression")+ theme(legend.position = "none")
-}
-# Add legend to the last plot
-else{plot_list_vln_CAR[[i]] <- vln_df_CAR[[i]] %>%
+plot_list_vln_CAR[[i]] <- vln_df_CAR[[i]] %>%
 ggplot(mapping=aes(x=Subset, y=Expression)) + geom_violin(mapping=aes(x=Subset, y=Expression, fill=Subset),scale = "width")+scale_fill_manual(values = alpha((mycolors),0.7))+ geom_boxplot(outlier.size = 0.01, width=0.3, size=0.5, alpha=0.4) + 
     theme_bw()+
   xlab("") +
@@ -971,7 +1013,7 @@ ggplot(mapping=aes(x=Subset, y=Expression)) + geom_violin(mapping=aes(x=Subset, 
   theme(aspect.ratio = 1, panel.grid = element_blank(),axis.title.y = element_text(size = 13), axis.text.y = element_text(size=13), axis.text.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5, size=plot.title.size, face = "bold"), plot.subtitle = element_text(size = 13)) +
   theme(legend.title = element_text(size = 13), legend.text = element_text(size = 13), legend.key.size = unit(0.5, "cm"))+ylab("Expression")
 }
-}
+
 ```
 
 ```{r}
@@ -986,16 +1028,16 @@ ggsave("~/Violins Fig 2C.pdf", plot=ggarrange(plotlist=plot_list_vln_CAR, ncol =
 ```
 
 
-## Fig. S5
+## Fig. S6
 
 List to compare groups
 ```{r}
-# For F3.Ut.allCAR
-compare.F3.Ut.allCAR <- list(c("1. Ctrl CD8", "2. Ctrl CD4"), c("3. CD8-LV CAR-", "4. CD8-LV CAR+"), c("5. CD4-LV CAR-", "6. CD4-LV CAR+"), c("7. VSV-LV CAR-", "8. VSV-LV CAR+"))
+# For F3.Ctrl.allCAR
+compare.F3.Ctrl.allCAR <- list(c("1. Ctrl CD8", "2. Ctrl CD4"), c("3. CD8-LV CAR-", "4. CD8-LV CAR+"), c("5. CD4-LV CAR-", "6. CD4-LV CAR+"), c("7. VSV-LV CAR-", "8. VSV-LV CAR+"))
 ```
 
 ```{r}
-# Final for F3.Ut.allCAR (|log2FC| > 0.2, FDR < 0.05) - alphabetical order (filtered) - found in file: "Unique upregulate in CAR- all comparisons.xlsx" & "Unique upregulate in CAR+ all comparisons.xlsx" 
+# Final for F3.Ctrl.allCAR (|log2FC| > 0.2, FDR < 0.05) - alphabetical order (filtered) - found in file: "Unique upregulate in CAR- all comparisons.xlsx" & "Unique upregulate in CAR+ all comparisons.xlsx" 
 gene <- c(
   # Antiviral
   "ADA2", "ADAR", "EEF1D","EIF2AK2", "GBP1", "GBP2", "IFI44L", "IFI6", "IFIH1", "IFITM1", "IFITM2", "IFITM3", "IRF1", "ISG20", "LY6E", "MX1", "OAS1","OAS2", "PARP9","SAMD9L", "SAMHD1", "SP110", "STAT1", "TRIM22",
@@ -1009,34 +1051,10 @@ gene <- c(
   "AES", "BTG1", "BTN3A2", "IL7R", "RIPOR2", "SATB1", "SELL","ZFP36L2")
 ```
 
-```{r}
-# Add_xy_position: the test helps only to set the y position of the later retrieved FDR values from the DGEA
-pwc[[i]] <- vln_df_CAR[[i]] %>% 
-  wilcox_test(Expression ~ Subset)
-pwc[[i]] <- pwc[[i]] %>% add_xy_position(x = "Subset")
-}
-
-# Retrieve FDR values 
-test <- do.call(rbind, unname(Map(cbind, id = names(pwc), pwc))) %>% add_column(FDR=NA)
-
-for(i in gene){
-  test[match(i, test$id),]$FDR <- CART.CD4CD8.markers[i,]$FDR 
-}
-  test <- add_significance(test, p.col = "FDR", output.col = "FDR.signif")
-
-# Pass back to the list
-pwc <- list()
-for(i in 1:nrow(test)) {             
-  pwc[[i]] <- test[i,]
-}
-names(pwc) <- test[,1]
-```
-
-
 #### Multiple genes (updated stats)
 ```{r}
-vln_df_F3.Ut.allCAR <- list()
- plot_list_vln_F3.Ut.allCAR <- list()
+vln_df_F3.Ctrl.allCAR <- list()
+ plot_list_vln_F3.Ctrl.allCAR <- list()
  pwc <- list()
  p.val.size <- 3
  plot.title.size <- 13
@@ -1046,67 +1064,73 @@ mycolors <- brewer.pal(8, "Paired")
 for(i in gene){
  
 #  violin plot without noise
-vln_df_F3.Ut.allCAR[[i]] = data.frame(Expression=F3.Ut.allCAR[["RNA"]]@data[i,], Subset = F3.Ut.allCAR$CAR)
+vln_df_F3.Ctrl.allCAR[[i]] = data.frame(Expression=F3.Ctrl.allCAR[["RNA"]]@data[i,], Subset = F3.Ctrl.allCAR$CAR)
 
 # Statistics
-pwc[[i]] <- vln_df_F3.Ut.allCAR[[i]] %>% 
-  wilcox_test(Expression ~ Subset, p.adjust.method = "none", comparisons = compare.F3.Ut.allCAR)
+pwc[[i]] <- vln_df_F3.Ctrl.allCAR[[i]] %>% 
+  wilcox_test(Expression ~ Subset, p.adjust.method = "none", comparisons = compare.F3.Ctrl.allCAR)
 pwc[[i]] <- pwc[[i]] %>% add_xy_position(x = "Subset")
-pwc[[i]]$FDR <- p.adjust(pwc[[i]]$p, method = "BH", n=length(gene))
-pwc[[i]] <- add_significance(pwc[[i]], p.col = "FDR", output.col = "FDR.signif")
+}
 
+# Retrieve FDR values 
+test <- do.call(rbind, unname(Map(cbind, id = names(pwc), pwc))) %>% add_column(FDR=NA)
 
+for (i in gene) {
+  try(test$FDR[test$id == i & test$groups %like% compare.F3.Ctrl.allCAR[[1]]] <- DEG.CD8.CD4.Ctrl$FDR[DEG.CD8.CD4.Ctrl$gene == i], silent = TRUE)
 
+  try(test$FDR[test$id == i & test$groups %like% compare.F3.Ctrl.allCAR[[2]]] <- i2.1$FDR[i2.1$gene == i], silent = TRUE)
 
+   try(test$FDR[test$id == i & test$groups %like% compare.F3.Ctrl.allCAR[[3]]] <- i3.1$FDR[i3.1$gene == i], silent=TRUE)
 
+   try(test$FDR[test$id == i & test$groups %like% compare.F3.Ctrl.allCAR[[4]]] <- DEG.CD8.CD4.VSV$FDR[DEG.CD8.CD4.VSV$gene == i], silent=TRUE)
+}
 
+test[is.na(test)] <- 1
 
+test <- add_significance(test, p.col = "FDR", output.col = "FDR.signif")
+
+# Pass back to the list
+pwc <- list()
+for(i in gene) {             
+  pwc[[i]] <- test[test$id == i,]
+}
+names(pwc) <- gene
+
+for(i in gene){
 # Graphs
 # Add noise for optimal visualization purposes like VlnPlot() 
-noise <- rnorm(n = length(x = vln_df_F3.Ut.allCAR[[i]][, "Expression"])) / 100000
-vln_df_F3.Ut.allCAR[[i]]$Expression <- vln_df_F3.Ut.allCAR[[i]]$Expression  + noise
+noise <- rnorm(n = length(x = vln_df_F3.Ctrl.allCAR[[i]][, "Expression"])) / 100000
+vln_df_F3.Ctrl.allCAR[[i]]$Expression <- vln_df_F3.Ctrl.allCAR[[i]]$Expression  + noise
 
  # Variable stats position
-y.position <- rep(max(vln_df_F3.Ut.allCAR[[i]]$Expression), 4)
+y.position <- rep(max(vln_df_F3.Ctrl.allCAR[[i]]$Expression), 4)
 
 # Variable ylim range
-ylim <- ylim(0, max(y.position)+0.1)
+ylim <- ylim(0, max(y.position)+0.3)
+
 
 # violin plot with noise
-if(i != gene[length(gene)]){
-  if (any(i == gene[seq(1, length(gene),by=7)])){
-  plot_list_vln_F3.Ut.allCAR[[i]] <- vln_df_F3.Ut.allCAR[[i]] %>%
-ggplot(mapping=aes(x=Subset, y=Expression)) + geom_violin(mapping=aes(x=Subset, y=Expression, fill=Subset),scale = "width")+scale_fill_manual(values = alpha((mycolors),0.9))+ geom_boxplot(outlier.size = 0.01, width=0.3, size=0.5, alpha=0.4) + 
-    theme_bw()+
-    xlab("") +
-  ggtitle(label=i) +
-  stat_pvalue_manual(pwc[[i]],  hide.ns = F, y.position = y.position, label = "FDR.signif", size = p.val.size, tip.length = 0) +
-  labs(subtitle = get_test_label(vln_df_F3.Ut.allCAR[[i]] %>% kruskal_test(Expression ~ Subset) %>% mutate(KW_FDR = p.adjust (p, method='BH', n=length(gene))) %>% add_significance(p.col = "KW_FDR"), p.col = "KW_FDR.signif", detailed=F, description = "KW (FDR)"))+ylim +
-  theme(panel.grid = element_blank(),axis.title.y = element_text(size = 12), axis.text.y = element_text(size=12), axis.text.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5, size=plot.title.size, face = "bold"), plot.subtitle = element_text(size = 9))+ylab("Expression")+ theme(legend.position = "none")
-}
-}
-else{plot_list_vln_F3.Ut.allCAR[[i]] <- vln_df_F3.Ut.allCAR[[i]] %>%
-ggplot(mapping=aes(x=Subset, y=Expression)) + geom_violin(mapping=aes(x=Subset, y=Expression, fill=Subset),scale = "width")+scale_fill_manual(values = alpha((mycolors),0.9))+ geom_boxplot(outlier.size = 0.01, width=0.3, size=0.5, alpha=0.4) + 
+  plot_list_vln_F3.Ctrl.allCAR[[i]] <- vln_df_F3.Ctrl.allCAR[[i]] %>%
+ggplot(mapping=aes(x=Subset, y=Expression)) + geom_violin(mapping=aes(x=Subset, y=Expression, fill=Subset),scale = "width")+scale_fill_manual(values = alpha((mycolors),0.9))+ geom_boxplot(outlier.size = 0.01, width=0.3, size=0.5, alpha=0.4)+
     theme_bw()+
   xlab("") +
   ggtitle(label=i) +
-  stat_pvalue_manual(pwc[[i]],  hide.ns = F, y.position =  y.position, label = "FDR.signif", size = p.val.size, tip.length = 0) +
-  labs(subtitle = get_test_label(vln_df_F3.Ut.allCAR[[i]] %>% kruskal_test(Expression ~ Subset) %>% mutate(KW_FDR = p.adjust (p, method='BH', n=length(gene))) %>% add_significance(p.col = "KW_FDR"), p.col = "KW_FDR.signif", detailed=F, description = "KW (FDR)"))+ylim +
-  theme(panel.grid = element_blank(),axis.title.y = element_text(size = 12), axis.text.y = element_text(size=12), axis.text.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5, size=plot.title.size, face = "bold"), plot.subtitle = element_text(size = 9)) +
-  theme(legend.title = element_text(size = 12), legend.text = element_text(size = 12), legend.key.size = unit(0.3, "cm"))+ylab("Expression")
-}
+  stat_pvalue_manual(pwc[[i]],  hide.ns = F, y.position =  y.position, label = "FDR.signif", size = p.val.size, tip.length = 0)+
+  theme(panel.grid = element_blank(),axis.title.y = element_text(size = 12), axis.text.y = element_text(size=12), axis.text.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5, size=plot.title.size, face = "bold")) +
+  theme(legend.title = element_text(size = 12), legend.text = element_text(size = 12), legend.key.size = unit(0.3, "cm"))+ylab("Expression")+scale_y_continuous(breaks = c(0, 1, 2, 3, 4, 5))+ylim
+
 }
 ```
 
 
 ```{r}
-# Set the factor "f" to adjust the size of the exported pdf, Boxplots: f=1.5 & w=12, Violin plots: f=  & w=
-f = 2.3
+# Set the factor "f" to adjust the size of the exported pdf
+f = 2.1
 w = 16
 h = f*if(length(gene)==any(seq(7,length(gene),by=7))){length(gene)} else{(length(gene)/7)+1}
 n = if(length(gene)==any(seq(7,length(gene),by=7))){length(gene)/7} else{(length(gene)/7)+1}
 
-ggsave("~/Violins Fig S5.pdf", plot=ggarrange(plotlist=plot_list_vln_F3.Ut.allCAR, ncol = 7, nrow=n, common.legend = T, legend = "right"), width = w, height = h, limitsize = F)
+ggsave("~/Violins Fig S5.pdf", plot=ggarrange(plotlist=plot_list_vln_F3.Ctrl.allCAR, ncol = 7, nrow=n, common.legend = T, legend = "right"), width = w, height = h, limitsize = F)
 ```
 
 
@@ -1136,10 +1160,11 @@ outputDirectory="~/", projectName = paste0(genesetname,"_pathway_KEGG"))
 
 ### Fig. 2B
 ```{r}
-ggplot(enrichResult_i3.3_KEGG, aes(x = reorder(description, normalizedEnrichmentScore), y = normalizedEnrichmentScore)) +
+# Save 7x3.5
+ggplot(enrichResult_CART.CD4CD8.markers_KEGG, aes(x = reorder(description, normalizedEnrichmentScore), y = normalizedEnrichmentScore)) +
   geom_bar(stat = "identity",
            show.legend = FALSE,
-           fill = alpha(ifelse(enrichResult_i3.3_KEGG$normalizedEnrichmentScore < 0, "darkred", "darkblue"), 0.7),     
+           fill = alpha(ifelse(enrichResult_CART.CD4CD8.markers_KEGG$normalizedEnrichmentScore < 0, "darkred", "darkblue"), 0.7),     
            color = "white") + 
   coord_flip(clip = "off") +
   xlab("") + ylab("Normalized enrichment score") + ggtitle("KEGG pathway")+
@@ -1199,8 +1224,9 @@ enrichResult_i3.2_KEGG <- WebGestaltR(enrichMethod="GSEA", organism="hsapiens",
   outputDirectory="~/", projectName = paste0(genesetname,"_pathway_KEGG"))
 ```
 
-### Fig. S4
+### Fig. S5
 ```{r}
+# save landscape 6.5x3.5
 #### CD8-LV CAR- vs CAR+
 ggplot(enrichResult_i2.1_KEGG, aes(x = reorder(description, normalizedEnrichmentScore), y = normalizedEnrichmentScore)) +
   geom_bar(stat = "identity",
@@ -1279,19 +1305,12 @@ ggplot(enrichResult_i3.2_KEGG, aes(x = reorder(description, normalizedEnrichment
                 vjust = 0.5,
                 hjust= ifelse(normalizedEnrichmentScore < 0, 0, 1),
                 y= ifelse(normalizedEnrichmentScore < 0, 0.1, -0.1)), size=4) +
-  scale_y_continuous(limits = c(-3,3), breaks = c(-3,-1.5,0,1.5,3))
+  scale_y_continuous(limits = c(-5,5), breaks = c(-3,-1.5,0,1.5,3))
 ```
 
 # Venn diagrams
-## Fig. S3A
+## Fig. S4A
 ```{r}
-# Common DE genes of all CAR- vs CAR+ comparisons
-Reduce(intersect, list(subset(i2.1, FDR <=0.05 & avg_log2FC <= -0.2 | FDR <= 0.05 & avg_log2FC > 0.2)$gene, 
-  subset(i2.2, FDR <=0.05 & avg_log2FC < -0.2 | FDR <=0.05 & avg_log2FC > 0.2)$gene,
-  subset(i3.1, FDR <=0.05 & avg_log2FC < -0.2 | FDR <=0.05 & avg_log2FC > 0.2)$gene,
-  subset(i3.2, FDR <=0.05 & avg_log2FC < -0.2 | FDR <=0.05 & avg_log2FC > 0.2)$gene,
-  subset(CART.CD4CD8.markers, FDR <=0.05 & avg_log2FC < -0.2 | FDR <=0.05 & avg_log2FC > 0.2)$gene))
-
 # All CAR+ vs CAR- (CD8-LV, CD4-LV, VSV-LV, VSV-LV, total CAR)
 ggVennDiagram::ggVennDiagram(list(
   subset(i2.1, FDR <=0.05 & avg_log2FC < -0.2 | FDR <= 0.05 & avg_log2FC > 0.2)$gene, 
@@ -1300,36 +1319,63 @@ ggVennDiagram::ggVennDiagram(list(
   subset(i3.2, FDR <=0.05 & avg_log2FC < -0.2 | FDR <=0.05 & avg_log2FC > 0.2)$gene,
   subset(CART.CD4CD8.markers, FDR <=0.05 & avg_log2FC < -0.2 | FDR <=0.05 & avg_log2FC > 0.2)$gene),
   label_alpha = 0.7, label = "count", set_size = 2, label_size = 10, category.names = c("CD8-LV", "VSV-LV", "CD4-LV", "VSV-LV ", "CAR"))+theme(legend.position = "none")
+
+# List of common genes of all comparisons
+Reduce(intersect, list(subset(i2.1, FDR <=0.05 & avg_log2FC <= -0.2 | FDR <= 0.05 & avg_log2FC > 0.2)$gene, 
+  subset(i2.2, FDR <=0.05 & avg_log2FC < -0.2 | FDR <=0.05 & avg_log2FC > 0.2)$gene,
+  subset(i3.1, FDR <=0.05 & avg_log2FC < -0.2 | FDR <=0.05 & avg_log2FC > 0.2)$gene,
+  subset(i3.2, FDR <=0.05 & avg_log2FC < -0.2 | FDR <=0.05 & avg_log2FC > 0.2)$gene,
+  subset(CART.CD4CD8.markers, FDR <=0.05 & avg_log2FC < -0.2 | FDR <=0.05 & avg_log2FC > 0.2)$gene))
 ```
-## Compare LV-inoculated samples with Untransduced cells
+
+## Compare LV-inoculated samples with Control cells
 ```{r}
 Idents(F3.CD8) <- "CD8CAR"
 Idents(F3.CD4) <- "CD4CAR"
 
-# Ut vs CD8-LV
-Ut1 <- FindMarkers(F3.CD8, logfc.threshold = 0.2, only.pos = F,ident.2 = "1. Untransduced", ident.1 = c("2. CD8-LV CAR-", "4. CD8-LV CAR+"), test.use = "wilcox")
-Ut1$gene <- row.names(Ut1)
-Ut1$FDR <- p.adjust(Ut1$p_val, method = "BH")
+# Ctrl vs CD8-LV
+Ctrl1 <- FindMarkers(F3.CD8, logfc.threshold = 0.2, only.pos = F,ident.2 = "1. Control", ident.1 = c("2. CD8-LV CAR-", "4. CD8-LV CAR+"), test.use = "wilcox")
+Ctrl1$gene <- row.names(Ctrl1)
+Ctrl1$FDR <- p.adjust(Ctrl1$p_val, method = "BH")
 
-Ut2 <- FindMarkers(F3.CD8, logfc.threshold = 0.2, only.pos = F,ident.2 = "1. Untransduced", ident.1 = c("3. VSV-LV CAR-", "5. VSV-LV CAR+"), test.use = "wilcox")
-Ut2$gene <- row.names(Ut2)
-Ut2$FDR <- p.adjust(Ut2$p_val, method = "BH")
+Ctrl2 <- FindMarkers(F3.CD8, logfc.threshold = 0.2, only.pos = F,ident.2 = "1. Control", ident.1 = c("3. VSV-LV CAR-", "5. VSV-LV CAR+"), test.use = "wilcox")
+Ctrl2$gene <- row.names(Ctrl2)
+Ctrl2$FDR <- p.adjust(Ctrl2$p_val, method = "BH")
 
-Ut3 <- FindMarkers(F3.CD4, logfc.threshold = 0.2, only.pos = F,ident.2 = "1. Untransduced", ident.1 = c("2. CD4-LV CAR-", "4. CD4-LV CAR+"), test.use = "wilcox")
-Ut3$gene <- row.names(Ut3)
-Ut3$FDR <- p.adjust(Ut3$p_val, method = "BH")
+Ctrl3 <- FindMarkers(F3.CD4, logfc.threshold = 0.2, only.pos = F,ident.2 = "1. Control", ident.1 = c("2. CD4-LV CAR-", "4. CD4-LV CAR+"), test.use = "wilcox")
+Ctrl3$gene <- row.names(Ctrl3)
+Ctrl3$FDR <- p.adjust(Ctrl3$p_val, method = "BH")
 
-Ut4 <- FindMarkers(F3.CD4, logfc.threshold = 0.2, only.pos = F,ident.2 = "1. Untransduced", ident.1 = c("3. VSV-LV CAR-", "5. VSV-LV CAR+"), test.use = "wilcox")
-Ut4$gene <- row.names(Ut4)
-Ut4$FDR <- p.adjust(Ut4$p_val, method = "BH")
+Ctrl4 <- FindMarkers(F3.CD4, logfc.threshold = 0.2, only.pos = F,ident.2 = "1. Control", ident.1 = c("3. VSV-LV CAR-", "5. VSV-LV CAR+"), test.use = "wilcox")
+Ctrl4$gene <- row.names(Ctrl4)
+Ctrl4$FDR <- p.adjust(Ctrl4$p_val, method = "BH")
 
-Ut5 <- FindMarkers(F3.filtered.cc, logfc.threshold = 0.2, only.pos = F,ident.2 = "1. Untransduced", ident.1 = "4. VSV-LV", test.use = "wilcox")
-Ut5$gene <- row.names(Ut5)
-Ut5$FDR <- p.adjust(Ut5$p_val, method = "BH")
+Ctrl5 <- FindMarkers(F3.filtered.cc, logfc.threshold = 0.2, only.pos = F,ident.2 = "1. Control", ident.1 = "4. VSV-LV", test.use = "wilcox")
+Ctrl5$gene <- row.names(Ctrl5)
+Ctrl5$FDR <- p.adjust(Ctrl5$p_val, method = "BH")
 ```
 
-### Fig. S2A
+### Fig. S3A
 ```{r}
-
+ggVennDiagram::ggVennDiagram(list(
+  subset(Ctrl1, FDR <=0.05)$gene, 
+  subset(Ctrl2, FDR <=0.05)$gene,
+  subset(Ctrl3, FDR <=0.05)$gene,
+  subset(Ctrl4, FDR <=0.05)$gene), 
+  label_alpha = 0.7, label = "count", set_size = 5, label_size = 10, category.names = c("CD8-LV", "VSV-LV (CD8)", "CD4-LV", "VSV-LV (CD4)"))+theme(legend.position = "none")
 ```
+
+### Genes for GSEA in Fig. S3B
+```{r}
+# Run in WebGestaltR online tool for over-representation analysis
+Ctrl.genes <- as.data.frame(Reduce(intersect, list(subset(Ctrl1, FDR <=0.05)$gene, 
+  subset(Ctrl2, FDR <=0.05)$gene,
+  subset(Ctrl3, FDR <=0.05)$gene,
+  subset(Ctrl4, FDR <=0.05)$gene)))
+colnames(Ctrl.genes) <- "gene"
+Ctrl.genes <- full.gene.names(Ctrl.genes)
+
+write.xlsx2(Ctrl.genes, "Unique genes.xlsx", sheetName = "Common 82 Ctrl vs each LV", col.names = T, row.names = T, append = T)
+```
+
 

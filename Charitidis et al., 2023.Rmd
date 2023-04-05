@@ -1010,7 +1010,7 @@ ggplot(mapping=aes(x=Subset, y=Expression)) + geom_violin(mapping=aes(x=Subset, 
   xlab("") +
   ggtitle(label=i) +
   stat_pvalue_manual(pwc[[i]],  hide.ns = F, y.position =  y.position, label = "FDR.signif", size = p.val.size, tip.length = 0)+ylim +
-  theme(aspect.ratio = 1, panel.grid = element_blank(),axis.title.y = element_text(size = 13), axis.text.y = element_text(size=13), axis.text.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5, size=plot.title.size, face = "bold"), plot.subtitle = element_text(size = 13)) +
+  theme(aspect.ratio = 1, panel.grid = element_blank(),axis.title.y = element_text(size = 13), axis.text.y = element_text(size=13), axis.text.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5, size=plot.title.size, face = "bold.italic"), plot.subtitle = element_text(size = 13)) +
   theme(legend.title = element_text(size = 13), legend.text = element_text(size = 13), legend.key.size = unit(0.5, "cm"))+ylab("Expression")
 }
 
@@ -1116,7 +1116,7 @@ ggplot(mapping=aes(x=Subset, y=Expression)) + geom_violin(mapping=aes(x=Subset, 
   xlab("") +
   ggtitle(label=i) +
   stat_pvalue_manual(pwc[[i]],  hide.ns = F, y.position =  y.position, label = "FDR.signif", size = p.val.size, tip.length = 0)+
-  theme(panel.grid = element_blank(),axis.title.y = element_text(size = 12), axis.text.y = element_text(size=12), axis.text.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5, size=plot.title.size, face = "bold")) +
+  theme(panel.grid = element_blank(),axis.title.y = element_text(size = 12), axis.text.y = element_text(size=12), axis.text.x = element_blank(), axis.ticks.x = element_blank(), plot.title = element_text(hjust = 0.5, size=plot.title.size, face = "bold.italic")) +
   theme(legend.title = element_text(size = 12), legend.text = element_text(size = 12), legend.key.size = unit(0.3, "cm"))+ylab("Expression")+scale_y_continuous(breaks = c(0, 1, 2, 3, 4, 5))+ylim
 
 }

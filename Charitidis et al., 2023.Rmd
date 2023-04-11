@@ -1375,7 +1375,7 @@ Ctrl.genes <- as.data.frame(Reduce(intersect, list(subset(Ctrl1, FDR <=0.05)$gen
 colnames(Ctrl.genes) <- "gene"
 Ctrl.genes <- full.gene.names(Ctrl.genes)
 
-write.xlsx(Ctrl.genes, "~/Unique genes.xlsx", sheetName = "Common 82 Ctrl vs each LV", col.names = T, row.names = T, append = T)
+write.xlsx(Ctrl.genes, "~/Unique genes.xlsx", sheetName = "Common genes Ctrl vs each LV", col.names = T, row.names = T, append = T)
 ```
 
 

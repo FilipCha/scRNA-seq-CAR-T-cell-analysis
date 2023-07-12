@@ -50,6 +50,8 @@ library(WebGestaltR)
 library(EnsDb.Hsapiens.v86)
 library(data.table)
 library(gtools)
+library(escape)
+library(dittoSeq)
 
 # Define increased memory size
 #memory.limit(80000)
@@ -1378,4 +1380,81 @@ Ctrl.genes <- full.gene.names(Ctrl.genes)
 write.xlsx(Ctrl.genes, "~/Unique genes.xlsx", sheetName = "Common genes Ctrl vs each LV", col.names = T, row.names = T, append = T)
 ```
 
+# Escape - GSEA
 
+Create an object for assessing cellular stress in transduced cells
+
+```{r}
+Idents(F3.filtered.cc) <- "Numbered.samples"
+DefaultAssay(F3.filtered.cc) <- "RNA"
+
+CARTCD8 <- subset(F3.filtered.cc, idents= c("2. CD8-LV", "4. VSV-LV"),CD8A > log1p(0.4891155) & CAR > log1p(2.979981))
+
+CARTCD8[["CAR"]] <- Idents(CARTCD8)
+CAR <- c("2. CD8-LV CD8+CAR+", "3. VSV-LV CD8+CAR+")
+names(CAR) <- levels(CARTCD8)
+Idents(CARTCD8) <- "CAR"
+CARTCD8 <- RenameIdents(CARTCD8, CAR)
+CARTCD8$CAR <- Idents(CARTCD8)
+levels(CARTCD8)
+
+CARTCD4 <- subset(F3.filtered.cc, idents= c("3. CD4-LV", "4. VSV-LV"),CD8A < log1p(0.4891155) & CAR > log1p(2.979981))
+
+CARTCD4[["CAR"]] <- Idents(CARTCD4)
+CAR <- c("5. CD4-LV CD4+CAR+", "6. VSV-LV CD4+CAR+")
+names(CAR) <- levels(CARTCD4)
+Idents(CARTCD4) <- "CAR"
+CARTCD4 <- RenameIdents(CARTCD4, CAR)
+CARTCD4$CAR <- Idents(CARTCD4)
+levels(CARTCD4)
+
+CD8ctrl <- subset(F3.filtered.cc, idents= c("1. Control"), CD8A > log1p(0.4891155))
+
+CD8ctrl[["CAR"]] <- Idents(CD8ctrl)
+CAR <- c("1. Control CD8+")
+names(CAR) <- levels(CD8ctrl)
+Idents(CD8ctrl) <- "CAR"
+CD8ctrl <- RenameIdents(CD8ctrl, CAR)
+CD8ctrl$CAR <- Idents(CD8ctrl)
+levels(CD8ctrl)
+
+CD4ctrl <- subset(F3.filtered.cc, idents= c("1. Control"), CD8A < log1p(0.4891155))
+
+CD4ctrl[["CAR"]] <- Idents(CD4ctrl)
+CAR <- c("4. Control CD4+")
+names(CAR) <- levels(CD4ctrl)
+Idents(CD4ctrl) <- "CAR"
+CD4ctrl <- RenameIdents(CD4ctrl, CAR)
+CD4ctrl$CAR <- Idents(CD4ctrl)
+levels(CD4ctrl)
+
+CART <- merge(CD8ctrl, c(CARTCD8, CD4ctrl, CARTCD4))
+remove(CARTCD4, CARTCD8, CD8ctrl, CD4ctrl)
+levels(CART)
+```
+
+```{r}
+GS_H <- getGeneSets(library = c("H")) # HALLMARK
+
+## Hallmark
+ES <- enrichIt(obj = CART, gene.sets = GS_H, groups = 1000, cores = 1)
+CART.GSEA_H <- AddMetaData(CART, ES)
+CART.GSEA_H@meta.data$active.idents <- CART@active.ident
+```
+
+### Fig. S8
+
+```{r, fig.height=12, fig.width=8}
+ggarrange(dittoPlot(CART.GSEA_H, "HALLMARK_DNA_REPAIR", group.by = "CAR")+scale_fill_manual(values = c("royalblue3", "royalblue3","royalblue3","royalblue3","royalblue3","royalblue3"))+ylab("Enrichment score")+xlab("")+NoLegend()+labs(title = "DNA repair")+theme(plot.title = element_text(hjust = 0.5), text = element_text(size=16),axis.text.x = element_blank(), aspect.ratio = 1),
+
+dittoPlot(CART.GSEA_H, "HALLMARK_P53_PATHWAY", group.by = "CAR")+scale_fill_manual(values = c("royalblue3", "royalblue3","royalblue3","royalblue3","royalblue3","royalblue3"))+ylab("Enrichment score")+xlab("")+NoLegend()+labs(title = "p53 pathway")+theme(plot.title = element_text(hjust = 0.5), text = element_text(size=16),axis.text.x = element_blank(), aspect.ratio = 1),
+
+dittoPlot(CART.GSEA_H, "HALLMARK_UNFOLDED_PROTEIN_RESPONSE", group.by = "CAR")+scale_fill_manual(values = c("royalblue3", "royalblue3","royalblue3","royalblue3","royalblue3","royalblue3"))+ylab("Enrichment score")+xlab("")+NoLegend()+labs(title = "Unfolded protein response")+theme(plot.title = element_text(hjust = 0.5), text = element_text(size=16),axis.text.x = element_blank(), aspect.ratio = 1),
+
+dittoPlot(CART.GSEA_H, "HALLMARK_REACTIVE_OXYGEN_SPECIES_PATHWAY", group.by = "CAR")+scale_fill_manual(values = c("royalblue3", "royalblue3","royalblue3","royalblue3","royalblue3","royalblue3"))+ylab("Enrichment score")+xlab("")+NoLegend()+labs(title = "Reactive oxygen species")+theme(plot.title = element_text(hjust = 0.5), text = element_text(size=16),axis.text.x = element_blank(), aspect.ratio = 1),
+
+dittoPlot(CART.GSEA_H, "HALLMARK_APOPTOSIS", group.by = "CAR")+scale_fill_manual(values = c("royalblue3", "royalblue3","royalblue3","royalblue3","royalblue3","royalblue3"))+ylab("Enrichment score")+xlab("")+NoLegend()+labs(title = "Apoptosis")+theme(plot.title = element_text(hjust = 0.5), text = element_text(size=16),axis.text.x = element_blank(), aspect.ratio = 1),
+
+ncol = 3, nrow = 2)
+
+```
